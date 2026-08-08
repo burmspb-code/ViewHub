@@ -44,12 +44,22 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
 
+        self.import_path_input = None
         self.zone1 = None
         self.password_input = None
         self.login_input = None
         self.api_url_input = None
         self.btn_toggle_pass = None
         self.btn_send_auth = None
+
+        # Навигация настроек
+        self.btn_settings_menu = None
+        self.btn_back_settings = None
+        self.page_settings = None
+
+        # Элементы полей настроек (для примера предустановок)
+        self.timeout_input = None
+        self.btn_save_settings = None
 
         self.stack = None
         self.page_menu = None
@@ -93,7 +103,9 @@ class MainWindow(QWidget):
         self.stack = QStackedWidget()
         z1_layout.addWidget(self.stack)
 
-        # СТРАНИЦА 1: МЕНЮ
+        # ==========================================
+        # СТРАНИЦА 1: Меню
+        # ==========================================
         self.page_menu = QWidget()
         menu_layout = QVBoxLayout(self.page_menu)
         menu_layout.setContentsMargins(0, 0, 0, 0)
@@ -105,24 +117,29 @@ class MainWindow(QWidget):
 
         self.btn_auth_menu = QPushButton("🔐  АВТОРИЗАЦИЯ")
         self.btn_auth_menu.setMinimumHeight(45)
-        self.btn_auth_menu.setStyleSheet("background-color: #3b82f6; color: white;")
+        #self.btn_auth_menu.setStyleSheet("background-color: #3b82f6; color: white;")
         menu_layout.addWidget(self.btn_auth_menu)
 
         self.btn_request = QPushButton("🌐  ЗАПРОС")
         self.btn_request.setMinimumHeight(45)
         menu_layout.addWidget(self.btn_request)
 
+        self.btn_settings_menu = QPushButton("⚙️  НАСТРОЙКИ")
+        self.btn_settings_menu.setMinimumHeight(45)
+        menu_layout.addWidget(self.btn_settings_menu)
+
         menu_layout.addStretch()
         self.stack.addWidget(self.page_menu)
 
+        # ==========================================
         # СТРАНИЦА 2: АВТОРИЗАЦИЯ
+        # ==========================================
         self.page_auth = QWidget()
         auth_layout = QVBoxLayout(self.page_auth)
         auth_layout.setContentsMargins(0, 0, 0, 0)
         auth_layout.setSpacing(10)
 
         self.btn_back = QPushButton("←  Назад к меню")
-        # Применяем стиль для кнопки Назад
         self.btn_back.setStyleSheet(BACK_BUTTON_STYLE)
         auth_layout.addWidget(self.btn_back)
         auth_layout.addSpacing(5)
@@ -152,24 +169,65 @@ class MainWindow(QWidget):
         self.btn_toggle_pass = QPushButton("Показать")
         self.btn_toggle_pass.setFixedWidth(75)
         self.btn_toggle_pass.setCursor(Qt.CursorShape.PointingHandCursor)
-        # 4. Применяем стиль кнопки Показать
         self.btn_toggle_pass.setStyleSheet(TOGGLE_PASS_BUTTON_STYLE)
 
         pass_layout.addWidget(self.password_input)
         pass_layout.addWidget(self.btn_toggle_pass)
         auth_layout.addLayout(pass_layout)
-
         auth_layout.addSpacing(15)
+
         self.btn_send_auth = QPushButton("Войти в систему")
         self.btn_send_auth.setMinimumHeight(42)
         self.btn_send_auth.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Применяем стиль зеленой кнопки отправки
         self.btn_send_auth.setStyleSheet(SUBMIT_BUTTON_STYLE)
         auth_layout.addWidget(self.btn_send_auth)
 
         auth_layout.addStretch()
         self.stack.addWidget(self.page_auth)
-        self.stack.setCurrentIndex(0)
+
+        # ==========================================
+        # СТРАНИЦА 3: ОКНО НАСТРОЕК И ПРЕДУСТАНОВОК
+        # ==========================================
+        self.page_settings = QWidget()
+        settings_layout = QVBoxLayout(self.page_settings)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(10)
+
+        self.btn_back_settings = QPushButton("←  Назад к меню")
+        self.btn_back_settings.setStyleSheet(BACK_BUTTON_STYLE)
+        settings_layout.addWidget(self.btn_back_settings)
+        settings_layout.addSpacing(5)
+
+        lbl_settings_title = QLabel("Предустановки системы")
+        lbl_settings_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #ffffff;")
+        settings_layout.addWidget(lbl_settings_title)
+        settings_layout.addSpacing(5)
+
+        # Поле предустановки: Таймаут сети
+        settings_layout.addWidget(QLabel("Таймаут запросов (сек):"))
+        self.timeout_input = QLineEdit()
+        self.timeout_input.setPlaceholderText("7")
+        self.timeout_input.setText("7")  # Значение по умолчанию
+        settings_layout.addWidget(self.timeout_input)
+
+        # Поле предустановки: Путь к папке импорта Excel/CSV (задел под Pandas)
+        settings_layout.addWidget(QLabel("Папка импорта данных:"))
+        self.import_path_input = QLineEdit()
+        self.import_path_input.setPlaceholderText("./logs")
+        settings_layout.addWidget(self.import_path_input)
+
+        # Кнопка СХРАНИТЬ НАСТРОЙКИ
+        settings_layout.addSpacing(15)
+        self.btn_save_settings = QPushButton("Сохранить конфигурацию")
+        self.btn_save_settings.setMinimumHeight(42)
+        self.btn_save_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_settings.setStyleSheet(SUBMIT_BUTTON_STYLE)  # Используем зеленый/акцентный стиль
+        settings_layout.addWidget(self.btn_save_settings)
+
+        settings_layout.addStretch()
+
+        # Добавляем страницу настроек в стек (она получит Индекс 2)
+        self.stack.addWidget(self.page_settings)
 
         # =============== Зона 2: Результат ===============
         self.zone2 = QFrame()
@@ -262,6 +320,24 @@ class MainWindow(QWidget):
             else:
                 self.result_display.append("Статус: Доступ отклонен.")
 
+    def show_settings_page(self):
+        """Переключить стек на страницу настроек (Индекс 2)."""
+        self.stack.setCurrentIndex(2)
+
+    def on_save_settings_click(self):
+        """
+        Обработать сохранение предустановок приложения.
+        """
+        timeout_val = self.timeout_input.text().strip()
+        path_val = self.import_path_input.text().strip()
+
+        logger.info(f"Конфигурация обновлена: Таймаут={timeout_val}с, Путь импорта='{path_val}'")
+        self.result_display.append(
+            f"[⚙️ CONFIG] Успешно сохранены предустановки:\n- Network Timeout: {timeout_val} seconds\n- Data Directory: {path_val}")
+
+        # После сохранения красиво возвращаем пользователя в меню
+        self.show_menu_page()
+
     def toggle_password_visibility(self):
         """Переключает видимость пароля между точками и обычным текстом."""
         if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
@@ -289,3 +365,7 @@ class MainWindow(QWidget):
 
         self.btn_send_auth.clicked.connect(self.on_click) # На аутентификацию
         self.btn_toggle_pass.clicked.connect(self.toggle_password_visibility) # На скрыть/показать пароль
+
+        self.btn_settings_menu.clicked.connect(self.show_settings_page)
+        self.btn_back_settings.clicked.connect(self.show_menu_page)
+        self.btn_save_settings.clicked.connect(self.on_save_settings_click)
