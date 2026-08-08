@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
 from src.auth.api_client import login_to_django
 # Импорты из созданных вами пакетов
 from src.core.logger import QTextEditHandler
+from src.core.resources import load_app_icon
 from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
                              TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
 
@@ -79,6 +80,8 @@ class MainWindow(QWidget):
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
+        self.setWindowIcon(load_app_icon())  # Иконка приложения
+
         self.setWindowTitle("ViewHub — Интеграция с API")
         self.resize(1100, 750)
 
