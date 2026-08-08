@@ -7,8 +7,8 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QPushButton, QTextEdit, QLabel,
-                             QFrame, QSplitter)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
+                             QPushButton, QTextEdit, QLabel, QFrame, QSplitter, QStackedWidget)
 
 
 class MainWindow(QWidget):
@@ -32,21 +32,33 @@ class MainWindow(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.log_display = None
-        self.zone3 = None
+
+        self.zone1 = None
+        self.password_input = None
+        self.login_input = None
+        self.api_url_input = None
+        self.btn_toggle_pass = None
+        self.btn_send_auth = None
+
+        self.stack = None
+        self.page_menu = None
+        self.page_auth = None
+        self.btn_auth_menu = None  # кнопка Аторизация
+        self.btn_request = None  # кнопка Запрос
+        self.btn_back = None  # Кнопка возврата в меню
+
         self.result_display = None
         self.zone2 = None
-        self.btn = None
-        self.input_field = None
-        self.zone1 = None
+
+        self.zone3 = None
+        self.log_display = None
 
         self.init_ui()
         self.connect_signals()
 
-
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
-        self.setWindowTitle("Интерфейс с раздвижными зонами")
+        self.setWindowTitle("ViewHub (взаимодейстсвие по API-интерфейсу")
         self.resize(1000, 700)
 
         # Основной макет окна
@@ -55,22 +67,91 @@ class MainWindow(QWidget):
         # --- СОЗДАЕМ ВЕРХНИЙ СПЛИТТЕР (для Зон 1 и 2) ---
         top_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Зона 1: Взаимодействие
+        # =========== Зона 1: Взаимодействие =============
         self.zone1 = QFrame()
         self.zone1.setFrameShape(QFrame.Shape.StyledPanel)
         z1_layout = QVBoxLayout(self.zone1)
-        z1_layout.addWidget(QLabel("<b>1 - Взаимодействие</b>"))
-        self.input_field = QLineEdit()
-        z1_layout.addWidget(self.input_field)
-        self.btn = QPushButton("Обработать")
-        z1_layout.addWidget(self.btn)
-        z1_layout.addStretch()
 
-        # Зона 2: Результат
+        # Создаем контейнер для переключения страниц
+        self.stack = QStackedWidget()
+        z1_layout.addWidget(self.stack)
+
+        # ==========================================
+        # СТРАНИЦА 1: ГЛАВНОЕ МЕНЮ ДЕЙСТВИЙ
+        # ==========================================
+        self.page_menu = QWidget()
+        menu_layout = QVBoxLayout(self.page_menu)
+        menu_layout.addWidget(QLabel("<b>Выберите действие:</b>"))
+
+        # Кнопка АВТОРИЗАЦИЯ
+        self.btn_auth_menu = QPushButton("АВТОРИЗАЦИЯ")
+        menu_layout.addWidget(self.btn_auth_menu)
+
+        self.btn_request = QPushButton("ЗАПРОС")
+        menu_layout.addWidget(self.btn_request)
+
+        # Сюда в будущем вы сможете добавить другие большие кнопки:
+        # self.btn_import_csv = QPushButton("ИМПОРТ CSV")
+        # menu_layout.addWidget(self.btn_import_csv)
+
+        menu_layout.addStretch()
+        self.stack.addWidget(self.page_menu)  # Индекс 0 в стопке
+
+        # ==========================================
+        # СТРАНИЦА 2: ФОРМА АВТОРИЗАЦИИ
+        # ==========================================
+        self.page_auth = QWidget()
+        auth_layout = QVBoxLayout(self.page_auth)
+
+        # Кнопка "Назад в меню"
+        self.btn_back = QPushButton("← Назад")
+        auth_layout.addWidget(self.btn_back)
+
+        auth_layout.addWidget(QLabel("<b>Авторизация API</b>"))
+
+        # Поле ввода API URL
+        auth_layout.addWidget(QLabel("Адрес API:"))
+        self.api_url_input = QLineEdit()
+        self.api_url_input.setPlaceholderText("https://your-vps-ip/api/v1")
+        auth_layout.addWidget(self.api_url_input)
+
+        # Поле ввода Логина
+        auth_layout.addWidget(QLabel("Логин:"))
+        self.login_input = QLineEdit()
+        self.login_input.setPlaceholderText("Введите логин")
+        auth_layout.addWidget(self.login_input)
+
+        # Поле ввода Пароля + Кнопка (в горизонтальном слое)
+        auth_layout.addWidget(QLabel("Пароль:"))
+        pass_layout = QHBoxLayout()
+
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Введите пароль")
+
+        self.btn_toggle_pass = QPushButton("Показать")
+        self.btn_toggle_pass.setFixedWidth(70)
+
+        pass_layout.addWidget(self.password_input)
+        pass_layout.addWidget(self.btn_toggle_pass)
+        auth_layout.addLayout(pass_layout)
+
+        # Главная кнопка действия
+        auth_layout.addSpacing(10)
+        self.btn_send_auth = QPushButton("Отправить")
+        auth_layout.addWidget(self.btn_send_auth)
+
+        auth_layout.addStretch()
+        self.stack.addWidget(self.page_auth)  # Индекс 1 в стопке
+
+        # Показываем первую страницу по умолчанию (Меню)
+        self.stack.setCurrentIndex(0)
+
+        # =============== Зона 2: Результат ===============
         self.zone2 = QFrame()
         self.zone2.setFrameShape(QFrame.Shape.StyledPanel)
         z2_layout = QVBoxLayout(self.zone2)
-        z2_layout.addWidget(QLabel("<b>2 - Результат</b>"))
+        z2_layout.addWidget(QLabel("<b>Данные</b>"))
         self.result_display = QTextEdit()
         z2_layout.addWidget(self.result_display)
 
@@ -88,15 +169,15 @@ class MainWindow(QWidget):
         self.zone3 = QFrame()
         self.zone3.setFrameShape(QFrame.Shape.StyledPanel)
         z3_layout = QVBoxLayout(self.zone3)
-        z3_layout.addWidget(QLabel("<b>3 - Логирование</b>"))
+        z3_layout.addWidget(QLabel("<b>Логирование</b>"))
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
         self.log_display.setStyleSheet("background-color: #f0f0f0;")
         z3_layout.addWidget(self.log_display)
 
         # Собираем всё вместе
-        main_splitter.addWidget(top_splitter) # Добавляем верхний блок (1 и 2)
-        main_splitter.addWidget(self.zone3)    # Добавляем низ (3)
+        main_splitter.addWidget(top_splitter)  # Добавляем верхний блок (1 и 2)
+        main_splitter.addWidget(self.zone3)  # Добавляем низ (3)
 
         # Начальное распределение высоты (70% верх, 30% низ)
         main_splitter.setStretchFactor(0, 3)
@@ -104,9 +185,6 @@ class MainWindow(QWidget):
 
         # Добавляем главный сплиттер в основной макет окна
         layout.addWidget(main_splitter)
-
-        # Логика кнопки
-        self.btn.clicked.connect(self.on_click)
 
     def on_click(self):
         """
@@ -116,13 +194,49 @@ class MainWindow(QWidget):
         в случае успеха, выводит данные в панели результатов и логов,
         после чего очищает поле ввода.
         """
-        txt = self.input_field.text()
-        if txt:
-            self.result_display.append(f"Вы ввели: {txt}")
-            self.log_display.append(f"[OK] Данные приняты: {txt}")
-            self.input_field.clear()
+
+        url = self.api_url_input.text()
+        log = self.login_input.text()
+        pas = self.password_input.text()
+
+        if not url or not log or not pas:
+            self.log_display.append(f"[❌] Данные введены не полностью.")
+            return
+
+        pas_mask = "*" * len(pas)  # Создание маски из звездочек
+
+        self.result_display.append(f"Вы ввели: адрес - {url}, логин - {log}, пароль - {pas_mask}")
+        self.log_display.append(f"[🟢] Данные авторизации отправлены на адрес - {url}.")
+
+        # Очистка полей для аутентификации
+        # self.api_url_input.clear()
+        # self.login_input.clear()
+        # self.password_input.clear()
+
+    def toggle_password_visibility(self):
+        """Переключает видимость пароля между точками и обычным текстом."""
+        if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
+            # Переключаем на отображение обычного текста
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle_pass.setText("Скрыть")
+        else:
+            # Снова скрываем в точки
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.btn_toggle_pass.setText("Показать")
+
+    def show_auth_page(self):
+        """Открыть страницу авторизации."""
+        self.stack.setCurrentIndex(1)  # Переключаем на индекс формы (1)
+
+    def show_menu_page(self):
+        """Вернуться на главную страницу меню."""
+        self.stack.setCurrentIndex(0)  # Возвращаем на индекс меню (0)
 
     def connect_signals(self):
         """Подключение обработчиков (слотов) к сигналам виджетов."""
-        # self.button.clicked.connect(self.on_button_click)
-        pass
+        # Логика переключения страниц
+        self.btn_auth_menu.clicked.connect(self.show_auth_page)  # На форму авторизации
+        self.btn_back.clicked.connect(self.show_menu_page)  # Назад в меню
+
+        self.btn_send_auth.clicked.connect(self.on_click) # На аутентификацию
+        self.btn_toggle_pass.clicked.connect(self.toggle_password_visibility) # На скрыть/показать пароль
