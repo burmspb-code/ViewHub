@@ -6,12 +6,20 @@
 с возможностью изменения размеров элементов через QSplitter.
 """
 
+import logging
+
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QApplication,
-                             QPushButton, QTextEdit, QLabel, QFrame, QSplitter, QStackedWidget)
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLineEdit, QPushButton, QTextEdit, QLabel,
+                             QFrame, QSplitter, QStackedWidget)
 
-from src.api_client import login_to_django
+from src.auth.api_client import login_to_django
+# Импорты из созданных вами пакетов
+from src.core.logger import QTextEditHandler
 
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
 class MainWindow(QWidget):
     """
@@ -188,6 +196,12 @@ class MainWindow(QWidget):
         # Добавляем главный сплиттер в основной макет окна
         layout.addWidget(main_splitter)
 
+        # Подключаем логгер для окна логов
+        qt_handler = QTextEditHandler(self.log_display)
+        qt_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s]: %(message)s", datefmt="%H:%M:%S"))
+        qt_handler.setLevel(logging.DEBUG)
+        logging.getLogger().addHandler(qt_handler)
+
     def on_click(self):
         """
         Обработать нажатие кнопки отправки через внешний API клиент.
@@ -196,22 +210,25 @@ class MainWindow(QWidget):
         username = self.login_input.text().strip()
         password = self.password_input.text()
 
+        # Проверяем заполненность полей
         if not url or not username or not password:
-            self.log_display.append("[❌] Заполните все поля для авторизации.")
+            logger.warning("Заполните все поля для авторизации.")  # Само улетит и в файл, и в окно логов!
             return
 
         # Информируем пользователя о начале процесса
         pas_mask = "*" * len(password)
-        self.log_display.append(f"[🔄] Отправка запроса на {url}...")
+        logger.info(f"Отправка запроса на {url}...")  # Автоматически отобразится в логах как [🔄] или [INFO]
+
+        # Окно «Данные/Результат» обновляем напрямую, так как это не лог, а отчет для пользователя
         self.result_display.append(f"Запрос: POST {url}\nТело: username='{username}', password='{pas_mask}'")
         QApplication.processEvents()
-        print("1234567890")
-        # Вызываем сетевую логику из нашего нового изолированного модуля!
+
+        # Вызываем сетевую логику из нашего изолированного модуля
         result = login_to_django(url, username, password)
 
         # Обрабатываем стандартизированный ответ от модуля api_client
         if result["success"]:
-            self.log_display.append(f"[🟢] УСПЕХ! {result['message']}")
+            logger.info(f"УСПЕХ! {result['message']}")
             self.result_display.append(f"Статус: Авторизован.\nТокен: {result['token']}")
 
             # Очищаем поля ввода
@@ -219,7 +236,7 @@ class MainWindow(QWidget):
             self.login_input.clear()
             self.password_input.clear()
         else:
-            self.log_display.append(f"[❌] {result['message']}")
+            logger.error(f"{result['message']}")
             if "details" in result:
                 self.result_display.append(f"Детали ошибки:\n{result['details']}")
             else:
