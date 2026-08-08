@@ -16,7 +16,8 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
 from src.auth.api_client import login_to_django
 # Импорты из созданных вами пакетов
 from src.core.logger import QTextEditHandler
-
+from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
+                             TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -68,132 +69,151 @@ class MainWindow(QWidget):
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
-        self.setWindowTitle("ViewHub (взаимодейстсвие по API-интерфейсу")
-        self.resize(1000, 700)
+        self.setWindowTitle("ViewHub — Интеграция с API")
+        self.resize(1100, 750)
 
-        # Основной макет окна
+        # Применяем глобальный стиль ко всему окну
+        self.setStyleSheet(GLOBAL_STYLE)
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
 
-        # --- СОЗДАЕМ ВЕРХНИЙ СПЛИТТЕР (для Зон 1 и 2) ---
         top_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # =========== Зона 1: Взаимодействие =============
         self.zone1 = QFrame()
-        self.zone1.setFrameShape(QFrame.Shape.StyledPanel)
-        z1_layout = QVBoxLayout(self.zone1)
+        # Применяем стиль боковой панели
+        self.zone1.setStyleSheet(SIDEBAR_STYLE)
 
-        # Создаем контейнер для переключения страниц
+        z1_layout = QVBoxLayout(self.zone1)
+        z1_layout.setContentsMargins(15, 20, 15, 20)
+        z1_layout.setSpacing(15)
+
         self.stack = QStackedWidget()
         z1_layout.addWidget(self.stack)
 
-        # ==========================================
-        # СТРАНИЦА 1: ГЛАВНОЕ МЕНЮ ДЕЙСТВИЙ
-        # ==========================================
+        # СТРАНИЦА 1: МЕНЮ
         self.page_menu = QWidget()
         menu_layout = QVBoxLayout(self.page_menu)
-        menu_layout.addWidget(QLabel("<b>Выберите действие:</b>"))
+        menu_layout.setContentsMargins(0, 0, 0, 0)
+        menu_layout.setSpacing(12)
 
-        # Кнопка АВТОРИЗАЦИЯ
-        self.btn_auth_menu = QPushButton("АВТОРИЗАЦИЯ")
+        lbl_title = QLabel("МЕНЮ ДЕЙСТВИЙ")
+        lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #94a3b8; letter-spacing: 1px;")
+        menu_layout.addWidget(lbl_title)
+
+        self.btn_auth_menu = QPushButton("🔐  АВТОРИЗАЦИЯ")
+        self.btn_auth_menu.setMinimumHeight(45)
+        self.btn_auth_menu.setStyleSheet("background-color: #3b82f6; color: white;")
         menu_layout.addWidget(self.btn_auth_menu)
 
-        self.btn_request = QPushButton("ЗАПРОС")
+        self.btn_request = QPushButton("🌐  ЗАПРОС")
+        self.btn_request.setMinimumHeight(45)
         menu_layout.addWidget(self.btn_request)
 
-        # Сюда в будущем вы сможете добавить другие большие кнопки:
-        # self.btn_import_csv = QPushButton("ИМПОРТ CSV")
-        # menu_layout.addWidget(self.btn_import_csv)
-
         menu_layout.addStretch()
-        self.stack.addWidget(self.page_menu)  # Индекс 0 в стопке
+        self.stack.addWidget(self.page_menu)
 
-        # ==========================================
-        # СТРАНИЦА 2: ФОРМА АВТОРИЗАЦИИ
-        # ==========================================
+        # СТРАНИЦА 2: АВТОРИЗАЦИЯ
         self.page_auth = QWidget()
         auth_layout = QVBoxLayout(self.page_auth)
+        auth_layout.setContentsMargins(0, 0, 0, 0)
+        auth_layout.setSpacing(10)
 
-        # Кнопка "Назад в меню"
-        self.btn_back = QPushButton("← Назад")
+        self.btn_back = QPushButton("←  Назад к меню")
+        # Применяем стиль для кнопки Назад
+        self.btn_back.setStyleSheet(BACK_BUTTON_STYLE)
         auth_layout.addWidget(self.btn_back)
+        auth_layout.addSpacing(5)
 
-        auth_layout.addWidget(QLabel("<b>Авторизация API</b>"))
+        lbl_auth_title = QLabel("Авторизация API")
+        lbl_auth_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #ffffff;")
+        auth_layout.addWidget(lbl_auth_title)
 
-        # Поле ввода API URL
         auth_layout.addWidget(QLabel("Адрес API:"))
         self.api_url_input = QLineEdit()
         self.api_url_input.setPlaceholderText("https://your-vps-ip/api/v1")
         auth_layout.addWidget(self.api_url_input)
 
-        # Поле ввода Логина
         auth_layout.addWidget(QLabel("Логин:"))
         self.login_input = QLineEdit()
         self.login_input.setPlaceholderText("Введите логин")
         auth_layout.addWidget(self.login_input)
 
-        # Поле ввода Пароля + Кнопка (в горизонтальном слое)
         auth_layout.addWidget(QLabel("Пароль:"))
         pass_layout = QHBoxLayout()
+        pass_layout.setSpacing(8)
 
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("Введите пароль")
 
         self.btn_toggle_pass = QPushButton("Показать")
-        self.btn_toggle_pass.setFixedWidth(70)
+        self.btn_toggle_pass.setFixedWidth(75)
+        self.btn_toggle_pass.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 4. Применяем стиль кнопки Показать
+        self.btn_toggle_pass.setStyleSheet(TOGGLE_PASS_BUTTON_STYLE)
 
         pass_layout.addWidget(self.password_input)
         pass_layout.addWidget(self.btn_toggle_pass)
         auth_layout.addLayout(pass_layout)
 
-        # Главная кнопка действия
-        auth_layout.addSpacing(10)
-        self.btn_send_auth = QPushButton("Отправить")
+        auth_layout.addSpacing(15)
+        self.btn_send_auth = QPushButton("Войти в систему")
+        self.btn_send_auth.setMinimumHeight(42)
+        self.btn_send_auth.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Применяем стиль зеленой кнопки отправки
+        self.btn_send_auth.setStyleSheet(SUBMIT_BUTTON_STYLE)
         auth_layout.addWidget(self.btn_send_auth)
 
         auth_layout.addStretch()
-        self.stack.addWidget(self.page_auth)  # Индекс 1 в стопке
-
-        # Показываем первую страницу по умолчанию (Меню)
+        self.stack.addWidget(self.page_auth)
         self.stack.setCurrentIndex(0)
 
         # =============== Зона 2: Результат ===============
         self.zone2 = QFrame()
-        self.zone2.setFrameShape(QFrame.Shape.StyledPanel)
+        self.zone2.setStyleSheet("QFrame { background-color: #f8fafc; border-radius: 8px; }")
         z2_layout = QVBoxLayout(self.zone2)
-        z2_layout.addWidget(QLabel("<b>Данные</b>"))
+        z2_layout.setContentsMargins(15, 15, 15, 15)
+
+        lbl_data_title = QLabel("<b>📋 ПАНЕЛЬ ВЫВОДА ДАННЫХ</b>")
+        lbl_data_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
+        z2_layout.addWidget(lbl_data_title)
+
         self.result_display = QTextEdit()
+        self.result_display.setPlaceholderText("Здесь будут отображаться структурированные ответы от Django API...")
         z2_layout.addWidget(self.result_display)
 
-        # Добавляем зоны в горизонтальный сплиттер
         top_splitter.addWidget(self.zone1)
         top_splitter.addWidget(self.zone2)
-        # Устанавливаем начальные пропорции (1:2)
         top_splitter.setStretchFactor(0, 1)
         top_splitter.setStretchFactor(1, 2)
 
         # --- СОЗДАЕМ ГЛАВНЫЙ ВЕРТИКАЛЬНЫЙ СПЛИТТЕР ---
         main_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Зона 3: Логирование
+        # =============== Зона 3: Логирование ===============
         self.zone3 = QFrame()
-        self.zone3.setFrameShape(QFrame.Shape.StyledPanel)
+        self.zone3.setStyleSheet("QFrame { background-color: #f8fafc; border-radius: 8px; }")
         z3_layout = QVBoxLayout(self.zone3)
-        z3_layout.addWidget(QLabel("<b>Логирование</b>"))
+        z3_layout.setContentsMargins(15, 15, 15, 15)
+
+        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ (ЛОГИ)</b>")
+        lbl_log_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
+        z3_layout.addWidget(lbl_log_title)
+
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet("background-color: #f0f0f0;")
+        # Применяем стиль для темной консоли
+        self.log_display.setStyleSheet(LOG_DISPLAY_STYLE)
         z3_layout.addWidget(self.log_display)
 
-        # Собираем всё вместе
-        main_splitter.addWidget(top_splitter)  # Добавляем верхний блок (1 и 2)
-        main_splitter.addWidget(self.zone3)  # Добавляем низ (3)
-
-        # Начальное распределение высоты (70% верх, 30% низ)
+        main_splitter.addWidget(top_splitter)
+        main_splitter.addWidget(self.zone3)
         main_splitter.setStretchFactor(0, 3)
         main_splitter.setStretchFactor(1, 1)
 
-        # Добавляем главный сплиттер в основной макет окна
         layout.addWidget(main_splitter)
 
         # Подключаем логгер для окна логов
