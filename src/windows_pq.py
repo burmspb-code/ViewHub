@@ -7,8 +7,10 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QApplication,
                              QPushButton, QTextEdit, QLabel, QFrame, QSplitter, QStackedWidget)
+
+from src.api_client import login_to_django
 
 
 class MainWindow(QWidget):
@@ -188,30 +190,40 @@ class MainWindow(QWidget):
 
     def on_click(self):
         """
-        Обработать нажатие кнопки для отправки введенного текста.
-
-        Считывает строку из поля ввода, проверяет её на пустоту и,
-        в случае успеха, выводит данные в панели результатов и логов,
-        после чего очищает поле ввода.
+        Обработать нажатие кнопки отправки через внешний API клиент.
         """
+        url = self.api_url_input.text().strip()
+        username = self.login_input.text().strip()
+        password = self.password_input.text()
 
-        url = self.api_url_input.text()
-        log = self.login_input.text()
-        pas = self.password_input.text()
-
-        if not url or not log or not pas:
-            self.log_display.append(f"[❌] Данные введены не полностью.")
+        if not url or not username or not password:
+            self.log_display.append("[❌] Заполните все поля для авторизации.")
             return
 
-        pas_mask = "*" * len(pas)  # Создание маски из звездочек
+        # Информируем пользователя о начале процесса
+        pas_mask = "*" * len(password)
+        self.log_display.append(f"[🔄] Отправка запроса на {url}...")
+        self.result_display.append(f"Запрос: POST {url}\nТело: username='{username}', password='{pas_mask}'")
+        QApplication.processEvents()
+        print("1234567890")
+        # Вызываем сетевую логику из нашего нового изолированного модуля!
+        result = login_to_django(url, username, password)
 
-        self.result_display.append(f"Вы ввели: адрес - {url}, логин - {log}, пароль - {pas_mask}")
-        self.log_display.append(f"[🟢] Данные авторизации отправлены на адрес - {url}.")
+        # Обрабатываем стандартизированный ответ от модуля api_client
+        if result["success"]:
+            self.log_display.append(f"[🟢] УСПЕХ! {result['message']}")
+            self.result_display.append(f"Статус: Авторизован.\nТокен: {result['token']}")
 
-        # Очистка полей для аутентификации
-        # self.api_url_input.clear()
-        # self.login_input.clear()
-        # self.password_input.clear()
+            # Очищаем поля ввода
+            self.api_url_input.clear()
+            self.login_input.clear()
+            self.password_input.clear()
+        else:
+            self.log_display.append(f"[❌] {result['message']}")
+            if "details" in result:
+                self.result_display.append(f"Детали ошибки:\n{result['details']}")
+            else:
+                self.result_display.append("Статус: Доступ отклонен.")
 
     def toggle_password_visibility(self):
         """Переключает видимость пароля между точками и обычным текстом."""
