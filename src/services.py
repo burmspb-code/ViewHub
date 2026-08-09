@@ -1,8 +1,10 @@
 """Модуль управления бизнес-логикой проекта."""
 
 import logging
+import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-from PyQt6.QtWidgets import QApplication
+# Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
+# и приводили к аппаратным сбоям C++ (0xC0000409).
 
 from src.auth.api_client import login_to_django
 
@@ -10,7 +12,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 # ======================= Логика обработки пользовательских запросов ============================
-def auth_on_click(obj):
+
+def auth_on_click(obj) -> None:
     """
     Аутентификация через внешний API клиент.
     """
@@ -20,16 +23,15 @@ def auth_on_click(obj):
 
     # Проверяем заполненность полей
     if not url or not username or not password:
-        logger.warning("Заполните все поля для авторизации.")  # Само улетит и в файл, и в окно логов!
+        logger.warning("Заполните все поля для авторизации.")
         return
 
     # Информируем пользователя о начале процесса
     pas_mask = "*" * len(password)
-    logger.info(f"Отправка запроса на {url}...")  # Автоматически отобразится в логах как [🔄] или [INFO]
+    logger.info(f"Отправка запроса на {url}...")
 
-    # Окно «Данные/Результат» обновляем напрямую, так как это не лог, а отчет для пользователя
+    # Окно «Данные/Результат» обновляем напрямую
     obj.result_display.append(f"Запрос: POST {url}\nТело: username='{username}', password='{pas_mask}'")
-    QApplication.processEvents()
 
     # Вызываем сетевую логику из нашего изолированного модуля
     result = login_to_django(url, username, password)
@@ -39,9 +41,11 @@ def auth_on_click(obj):
         logger.info(f"УСПЕХ! {result['message']}")
         obj.result_display.append(f"Статус: Авторизован.\nТокен: {result['token']}")
 
+        # Сохраняем токен и базовый url в класс главного окна
+        obj.auth_token = result["token"]
+        obj.base_url = url
 
-
-        # Очищаем поля ввода
+        # Очищаем поля ввода (разметка зафиксирована на 35px, ничего не съедет)
         obj.api_url_input.clear()
         obj.login_input.clear()
         obj.password_input.clear()
@@ -53,5 +57,66 @@ def auth_on_click(obj):
             obj.result_display.append("Статус: Доступ отклонен.")
 
 
-def requests_on_click(obj):
-    """Отправка GET запроса."""
+def request_on_click(obj) -> None:
+    """
+    Отправляет GET-запрос на Django API по полному пути через httpx.
+
+    Args:
+        obj: объект главного окна (MainWindow)
+
+    Returns:
+        None
+    """
+    # 1. Проверяем, авторизован ли пользователь
+    base_url = getattr(obj, "base_url", None)
+    token = getattr(obj, "auth_token", None)
+
+    if not base_url or not token:
+        logger.error("Ошибка: вы не авторизованы. Сначала выполните вход.")
+        obj.result_display.append("Статус: Запрос отклонен. Требуется авторизация.")
+        return
+
+    # 2. Достаем полный URL эндпоинта из правильного виджета
+    full_url = obj.api_request_url_input.text().strip()
+
+    if not full_url:
+        logger.error("Ошибка: вы не ввели эндпоинт.")
+        obj.result_display.append("Статус: Запрос отклонен. Требуется эндпоинт.")
+        return
+
+    # 3. Передаем JWT-токен с правильным префиксом Bearer
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    # Передаем параметры фильтрации/поиска (Query Parameters)
+    params = {
+        "page": 1,
+        "status": "active"
+    }
+
+    logger.info(f"Отправка GET-запроса на {full_url}...")
+    obj.result_display.append(f"Запрос: GET {full_url}\nПараметры: {params}")
+
+    try:
+        # Использование httpx.Client с trust_env=False полностью изолирует
+        # процесс от сетевого окружения Windows, прокси и VPN-маршрутов на 127.0.0.1
+        with httpx.Client(trust_env=False) as client:
+            response = client.get(full_url, headers=headers, params=params, timeout=10.0)
+
+        # 4. Проверяем HTTP статус-код (200 OK)
+        if response.status_code == 200:
+            tasks_data = response.json()  # Безопасно парсим полученный JSON от Django
+            logger.info("Данные успешно получены через HTTPX!")
+
+            # Выводим результат в окно отчетности пользователя
+            obj.result_display.append(f"Ответ сервера (200 OK):\n{tasks_data}")
+        else:
+            logger.error(f"Ошибка сервера: Код {response.status_code}")
+            obj.result_display.append(f"Код: {response.status_code}\nДетали: {response.text}")
+
+    # Перехватываем исключения исключительно из библиотеки httpx
+    except httpx.HTTPError as e:
+        logger.error(f"Ошибка сети httpx при отправке запроса: {e}")
+        obj.result_display.append(f"Критическая ошибка сети: {e}")
