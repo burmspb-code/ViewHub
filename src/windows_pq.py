@@ -13,12 +13,12 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QTextEdit, QLabel,
                              QFrame, QSplitter, QStackedWidget)
 
-from src.auth.api_client import login_to_django
-# Импорты из созданных вами пакетов
+
 from src.core.logger import QTextEditHandler
 from src.core.resources import load_app_icon
 from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
                              TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
+from src.services import auth_on_click, requests_on_click
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -77,6 +77,10 @@ class MainWindow(QWidget):
 
         self.init_ui()
         self.connect_signals()
+
+        # Задаем токен и url для дальнейшей работы
+        self.auth_token = None
+        self.base_url = None
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
@@ -283,46 +287,6 @@ class MainWindow(QWidget):
         qt_handler.setLevel(logging.DEBUG)
         logging.getLogger().addHandler(qt_handler)
 
-    def on_click(self):
-        """
-        Обработать нажатие кнопки отправки через внешний API клиент.
-        """
-        url = self.api_url_input.text().strip()
-        username = self.login_input.text().strip()
-        password = self.password_input.text()
-
-        # Проверяем заполненность полей
-        if not url or not username or not password:
-            logger.warning("Заполните все поля для авторизации.")  # Само улетит и в файл, и в окно логов!
-            return
-
-        # Информируем пользователя о начале процесса
-        pas_mask = "*" * len(password)
-        logger.info(f"Отправка запроса на {url}...")  # Автоматически отобразится в логах как [🔄] или [INFO]
-
-        # Окно «Данные/Результат» обновляем напрямую, так как это не лог, а отчет для пользователя
-        self.result_display.append(f"Запрос: POST {url}\nТело: username='{username}', password='{pas_mask}'")
-        QApplication.processEvents()
-
-        # Вызываем сетевую логику из нашего изолированного модуля
-        result = login_to_django(url, username, password)
-
-        # Обрабатываем стандартизированный ответ от модуля api_client
-        if result["success"]:
-            logger.info(f"УСПЕХ! {result['message']}")
-            self.result_display.append(f"Статус: Авторизован.\nТокен: {result['token']}")
-
-            # Очищаем поля ввода
-            self.api_url_input.clear()
-            self.login_input.clear()
-            self.password_input.clear()
-        else:
-            logger.error(f"{result['message']}")
-            if "details" in result:
-                self.result_display.append(f"Детали ошибки:\n{result['details']}")
-            else:
-                self.result_display.append("Статус: Доступ отклонен.")
-
     def show_settings_page(self):
         """Переключить стек на страницу настроек (Индекс 2)."""
         self.stack.setCurrentIndex(2)
@@ -366,8 +330,10 @@ class MainWindow(QWidget):
         self.btn_auth_menu.clicked.connect(self.show_auth_page)  # На форму авторизации
         self.btn_back.clicked.connect(self.show_menu_page)  # Назад в меню
 
-        self.btn_send_auth.clicked.connect(self.on_click) # На аутентификацию
+        self.btn_send_auth.clicked.connect(lambda: auth_on_click(self)) # На аутентификацию
         self.btn_toggle_pass.clicked.connect(self.toggle_password_visibility) # На скрыть/показать пароль
+
+        self.btn_request.clicked.connect(lambda: requests_on_click(self))
 
         self.btn_settings_menu.clicked.connect(self.show_settings_page)
         self.btn_back_settings.clicked.connect(self.show_menu_page)
