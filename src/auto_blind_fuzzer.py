@@ -284,8 +284,14 @@ async def main_async_scan(target_url, output_json_path):
 
         sorted_results = sorted(list(set(sanitized_results)), key=lambda x: (x, x))
 
-        # Формируем чистый JSON для PyQt6 QComboBox
-        json_endpoints = [f"[{item}] {item}" for item in sorted_results]
+        # УНИВЕРСАЛЬНАЯ РАСПАКОВКА: маркер, путь и статус забираем строго,
+        # а все остальные скрытые элементы (если они есть) уходят в список extra
+        json_endpoints = []
+        for item in sorted_results:
+            marker, path, status, *extra = item
+            # Собираем красивую строку для PyQt6 QComboBox:
+            note = f" | Заметка: {extra[0]}" if extra else ""
+            json_endpoints.append(f"[{marker}] {path} (Код: {status}){note}")
 
         try:
             os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
