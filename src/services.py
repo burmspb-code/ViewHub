@@ -1,5 +1,6 @@
 """Модуль управления бизнес-логикой проекта."""
 
+import json
 import logging
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
@@ -45,10 +46,10 @@ def auth_on_click(obj) -> None:
         obj.auth_token = result["token"]
         obj.base_url = url
 
-        # Очищаем поля ввода (разметка зафиксирована на 35px, ничего не съедет)
-        obj.api_url_input.clear()
-        obj.login_input.clear()
-        obj.password_input.clear()
+        # Очищаем поля ввода
+        # obj.api_url_input.clear()
+        # obj.login_input.clear()
+        # obj.password_input.clear()
     else:
         logger.error(f"{result['message']}")
         if "details" in result:
@@ -110,8 +111,11 @@ def request_on_click(obj) -> None:
             tasks_data = response.json()  # Безопасно парсим полученный JSON от Django
             logger.info("Данные успешно получены через HTTPX!")
 
+            # Преобразуем ответ в человекочитаемый текст
+            pretty_json = json.dumps(tasks_data, indent=4, ensure_ascii=False)
+
             # Выводим результат в окно отчетности пользователя
-            obj.result_display.append(f"Ответ сервера (200 OK):\n{tasks_data}")
+            obj.result_display.append(f"Ответ сервера (200 OK):\n{pretty_json}")
         else:
             logger.error(f"Ошибка сервера: Код {response.status_code}")
             obj.result_display.append(f"Код: {response.status_code}\nДетали: {response.text}")
