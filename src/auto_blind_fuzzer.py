@@ -7,9 +7,9 @@ import asyncio
 import json
 import os
 import re
-from urllib.parse import urljoin
-from bs4 import BeautifulSoup
+
 import httpx
+from bs4 import BeautifulSoup
 
 # Ограничение на количество одновременных сетевых соединений (защита от бана VPS)
 MAX_CONCURRENT_REQUESTS = 5
@@ -179,6 +179,16 @@ async def main_async_scan(target_url, output_json_path):
                 for match in api_matches:
                     discovered_api_markers.add(match)
 
+        # ДОБАВЛЕНО: Глобальная ИИ-страховка на случай скрытых в JavaScript REST-эндпоинтов
+        # Если паук не нашел маркеров в HTML, мы принудительно закладываем стандарты 'api' и 'v1'
+        if not discovered_api_markers:
+            discovered_api_markers.add("api")
+            discovered_api_markers.add("v1")
+        else:
+            # На случай, если нашли только 'api', докидываем 'v1' для глубины матрицы
+            discovered_api_markers.add("api")
+            discovered_api_markers.add("v1")
+
         detected_apps = set()
         for path in wordlist:
             if path and path.startswith("/"):
@@ -231,10 +241,12 @@ async def main_async_scan(target_url, output_json_path):
 
         # ТВОЯ СТРАТЕГИЯ В ДЕЙСТВИИ: Если зацепки найдены, генерируем под них перевернутый API-роутинг
         if detected_apps and discovered_api_markers:
-            entities = ["task", "user", "product", "order", "bookmark"]
+            # Расширяем сущности (добавили множественное число по стандартам REST)
+            entities = ["task", "tasks", "user", "users", "bookmark", "bookmarks"]
             actions = ["list", "view", "create", "update", "delete", "create-api", "update-api"]
+            # Тестовые ID для проверки роутов типа /api/v1/bookmarks/1/
+            rest_ids = ["1"]
 
-            # Собираем комбинации вроде 'api/v1'
             marker_combos = list(discovered_api_markers)
             if "api" in discovered_api_markers and len(discovered_api_markers) > 1:
                 for m in discovered_api_markers:
@@ -244,11 +256,17 @@ async def main_async_scan(target_url, output_json_path):
             for app in detected_apps:
                 for entity in entities:
                     for marker in marker_combos:
+                        # 1. Стандартные плоские экшены (ваш старый код)
                         for action in actions:
-                            # Шаблон: /daily/task/api/v1/list
                             wordlist.append(f"/{app}/{entity}/{marker}/{action}")
-                            # Шаблон: /daily/api/v1/task/list
                             wordlist.append(f"/{app}/{marker}/{entity}/{action}")
+
+                        # 2. НОВОЕ: Пробиваем REST стандарты с ID в середине
+                        # Шаблон: /daily/api/v1/bookmarks/1
+                        # Шаблон: /api/v1/bookmarks/1 (на случай если префикса приложения нет)
+                        for r_id in rest_ids:
+                            wordlist.append(f"/{app}/{marker}/{entity}/{r_id}")
+                            wordlist.append(f"/{marker}/{entity}/{r_id}")
 
         # Умное выравнивание: ставит слэш на конце, но защищает корень сайта '/' от превращения в '//'
         raw_clean = set()
@@ -318,16 +336,6 @@ async def main_async_scan(target_url, output_json_path):
 
             print(f"{index:<3} | {marker:<5} | {status:<5} | {note:<18} | {path}")
         print("=" * 90)
-
-def run_security_api_scan(target_url, output_json_path=None):
-    """Синхронный инициализатор асинхронного ядра."""
-    if output_json_path is None:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        output_json_path = os.path.join(current_dir, "endpoints_config.json")
-
-    print(f"[🔄] Инициализация УНИВЕРСАЛЬНОГО ЭКСПРЕСС-ФАЗЗЕРА...")
-    asyncio.run(main_async_scan(target_url, output_json_path))
-
 
 def run_security_api_scan(target_url, output_json_path=None):
     """Синхронный инициализатор асинхронного ядра."""
