@@ -5,15 +5,24 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
+# Импортируем ядро Qt для управления событиями интерфейса
+from PyQt6.QtCore import QCoreApplication
 
 import httpx
 from bs4 import BeautifulSoup
 
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+# Подавляем DEBUG-логи от системного асинхронного ядра Python и httpx
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 # Ограничение на количество одновременных сетевых соединений (защита от бана VPS)
 MAX_CONCURRENT_REQUESTS = 5
-semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
 def extract_api_hints(html_text):
     """Ищет скрытые текстовые зацепки и пути в HTML-разметке сайта."""
@@ -90,7 +99,7 @@ def generate_universal_express_wordlist(detected_apps=None) -> list:
     return list(set(routes))
 
 
-async def test_single_path(client, target_url, path_clean, valid_endpoints):
+async def test_single_path(client, target_url, path_clean, valid_endpoints, semaphore: asyncio.Semaphore):
     """Асинхронная корутина проверки эндпоинта методами GET и POST для пробива API."""
     if path_clean.startswith("/admin/") and path_clean != "/admin/":
         return
@@ -116,7 +125,7 @@ async def test_single_path(client, target_url, path_clean, valid_endpoints):
                 if any(msg in page_title for msg in ["страница не найдена", "page not found", "404"]):
                     status_code = 404
 
-            # 2. ТВОЙ ПРОБИВ: Если GET выдал 404, но путь явно похож на API, пробуем бахнуть POST-запросом!
+            # 2. Если GET выдал 404, но путь явно похож на API, пробуем бахнуть POST-запросом!
             if status_code == 404 and any(api_marker in path_clean.lower() for api_marker in ["/api/", "/v1/", "/v2/"]):
                 try:
                     post_res = await client.post(full_test_url, timeout=3.0)
@@ -134,7 +143,19 @@ async def test_single_path(client, target_url, path_clean, valid_endpoints):
         except httpx.HTTPError:
             pass
 
-async def main_async_scan(target_url, output_json_path):
+
+def print_progress_bar(current, total, bar_length=30):
+    """Рисует динамическую полосу прогресса в консоли."""
+    fraction = current / total
+    arrow = int(fraction * bar_length - 1) * "▓" + "▓"
+    padding = int(bar_length - len(arrow)) * "░"
+    percent = int(fraction * 100)
+
+    # \r возвращает курсор в начало строки, а end="" не дает перенестись на новую строку
+    print(f"\r[📡] Прогресс сканирования: [{arrow}{padding}] {percent}% ({current}/{total})", end="", flush=True)
+
+
+async def main_async_scan(obj, target_url, output_json_path):
     """Главный управляющий асинхронный движок."""
     wordlist = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -144,10 +165,10 @@ async def main_async_scan(target_url, output_json_path):
         try:
             response = await client.get(target_url, timeout=5.0)
         except Exception as e:
-            print(f"[❌] Ошибка первичного подключения к серверу: {e}")
+            logger.error(f"[❌] Ошибка первичного подключения к серверу: {e}")
             return
 
-        print("[🔎] Анализ структуры и извлечение явных путей...")
+        obj.result_display.append("[🔎] Анализ структуры и извлечение явных путей...")
         soup = BeautifulSoup(response.text, "html.parser")
 
         # Сюда собираем сырые пути для поиска скрытых API-маркеров
@@ -179,28 +200,62 @@ async def main_async_scan(target_url, output_json_path):
                 for match in api_matches:
                     discovered_api_markers.add(match)
 
-        # ДОБАВЛЕНО: Глобальная ИИ-страховка на случай скрытых в JavaScript REST-эндпоинтов
-        # Если паук не нашел маркеров в HTML, мы принудительно закладываем стандарты 'api' и 'v1'
+        # === ИНТЕЛЛЕКТУАЛЬНЫЙ BLACK-BOX ПРЕД-ПРОБИВ СКРЫТОГО API ===
+        # Если в HTML ничего не найдено, мы проверяем реакцию сервера напрямую через быстрые сетевые зонды
         if not discovered_api_markers:
-            discovered_api_markers.add("api")
-            discovered_api_markers.add("v1")
+            if hasattr(obj, 'result_display') and obj.result_display:
+                obj.result_display.append(
+                    "[🔎] Маркеры не найдены в HTML. Запуск Black-Box зондирования корня API...")
+
+            test_api_paths = ["/api/", "/api/v1/"]
+            api_detected_in_wild = False
+
+            for api_path in test_api_paths:
+                try:
+                    api_check_res = await client.get(f"{target_url.rstrip('/')}{api_path}", timeout=3.0)
+                    # Если код НЕ 404 — значит, там что-то живет (200, 401, 403 или 405)!
+                    if api_check_res.status_code != 404:
+                        api_detected_in_wild = True
+                        break
+                except Exception:
+                    pass
+
+            if api_detected_in_wild:
+                if hasattr(obj, 'result_display') and obj.result_display:
+                    obj.result_display.append("[🧠] Динамическое зондирование подтвердило скрытую REST-структуру!")
+                discovered_api_markers.add("api")
+                discovered_api_markers.add("v1")
+            else:
+                if hasattr(obj, 'result_display') and obj.result_display:
+                    obj.result_display.append(
+                        "[ℹ️] Зондирование завершено: Скрытая REST-архитектура отсутствует. Переход в WEB-режим.")
         else:
-            # На случай, если нашли только 'api', докидываем 'v1' для глубины матрицы
+            # Если маркеры нашли в самом HTML — железно добавляем v1 для глубины матрицы
             discovered_api_markers.add("api")
             discovered_api_markers.add("v1")
 
+        # === СБОР УНИКАЛЬНЫХ МОДУЛЕЙ СИСТЕМЫ ===
         detected_apps = set()
         for path in wordlist:
             if path and path.startswith("/"):
                 parts = path.split("/")[1] if len(path.split("/")) > 1 else ""
-                if parts and parts not in ["admin", "api", "static"]:
+                # Фильтруем системные префиксы
+                if parts and parts not in ["admin", "api", "static", "product", "category", "contacts", "blog"]:
                     detected_apps.add(parts)
 
+        # КЛАССИЧЕСКИЙ BLACK-BOX СЛОВАРЬ: Докидываем мировые стандарты и частые модули,
+        # чтобы вскрыть скрытые приложения, на которые нет ссылок в интерфейсе
+        common_web_apps = ["library", "mailings", "mailing", "blog", "shop", "orders", "cart", "profile", "dashboard"]
+        for app in common_web_apps:
+            # Чтобы не раздувать матрицу, добавляем их, только если сканер в чистом WEB-режиме
+            detected_apps.add(app)
 
-        if discovered_api_markers:
-            print(f"[🧠] Зацепка! Найдены скрытые API-маркеры: {list(discovered_api_markers)}")
-        if detected_apps:
-            print(f"[🧠] Обнаружены уникальные модули системы: {list(detected_apps)}")
+        # Вывод зацепок в графическое окно PyQt/PySide
+        if hasattr(obj, 'result_display') and obj.result_display:
+            if discovered_api_markers and any(m in clean_paths for m in ["api", "v1"]) if 'clean_paths' in locals() else discovered_api_markers:
+                obj.result_display.append(f"[🧠] Активные API-маркеры матрицы: {list(discovered_api_markers)}")
+            if detected_apps:
+                obj.result_display.append(f"[🧠] Обнаружены уникальные модули системы: {list(detected_apps)}")
 
             # ПОЛНАЯ ПЛОСКАЯ CRUD-МАТРИЦА (Доработана под структуру blog/post и product)
             crud_actions = [
@@ -221,7 +276,7 @@ async def main_async_scan(target_url, output_json_path):
             if "product" in detected_apps or "catalog" in detected_apps:
                 wordlist.extend(["/catalog/list", "/catalog/list/"])
 
-        print("[💀] Компиляция универсальной матрицы путей (Мировой стандарт + ИИ)...")
+        obj.result_display.append("[💀] Компиляция универсальной матрицы путей (Мировой стандарт + ИИ)...")
         wordlist.extend(generate_universal_express_wordlist(detected_apps=detected_apps))
 
         # ДИНАМИЧЕСКИЙ ПРОБИВ ID И SLUG (Для вскрытия страниц редактирования/удаления)
@@ -282,48 +337,100 @@ async def main_async_scan(target_url, output_json_path):
         clean_paths = [p if p != "//" else "/" for p in clean_paths]
         total_paths = len(clean_paths)
 
-        print(f"[🚀] Сгенерировано чистых уникальных комбинаций: {total_paths}")
-        print("[⚡] Запуск параллельного экспресс-сканирования. Пожалуйста, подождите...")
+        obj.result_display.append(f"[🚀] Сгенерировано чистых уникальных комбинаций: {total_paths}")
+        obj.result_display.append("[⚡] Запуск параллельного экспресс-сканирования. Пожалуйста, подождите...")
 
+        # === МОДЕРНИЗИРОВАННЫЙ СЕТЕВОЙ ДВИЖОК С АСИНХРОННЫМ ИНДИКАТОРОМ ===
+        # ИСПРАВЛЕНО: Создаем семафор внутри текущего event loop, чтобы избежать RuntimeError
+        # Вы можете изменить число 20 на нужный вам лимит параллельных запросов
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+        # Передаем созданный semaphore аргументом в функцию-тестировщик
         tasks = [
-            test_single_path(client, target_url, path, valid_endpoints)
+            asyncio.create_task(test_single_path(client, target_url, path, valid_endpoints, semaphore))
             for path in clean_paths
         ]
-        await asyncio.gather(*tasks)
 
-        # ПОСТОЯННЫЙ ИНДИКАТОР: Показывает реальное количество найденных сетевых ответов
-        print(f"[📊] Сетевой движок завершил работу. Сырое множество содержит: {len(valid_endpoints)} элементов.")
+        completed_count = 0
+        total_tasks = len(tasks)
 
-        # Безопасное извлечение 3-х базовых элементов (marker, path, status)
+        # Логика формирования графической строки прогресса
+        def get_ui_progress_text(current, total, bar_length=20):
+            fraction = current / total
+            arrow = int(fraction * bar_length - 1) * "▓" + "▓" if current > 0 else ""
+            padding = int(bar_length - len(arrow)) * "░"
+            percent = int(fraction * 100)
+            return f"[📡] Прогресс сканирования: [{arrow}{padding}] {percent}% ({current}/{total})"
+
+        # Выводим стартовый пустой индикатор в графическое текстовое поле
+        if hasattr(obj, 'result_display') and obj.result_display:
+            obj.result_display.append(get_ui_progress_text(completed_count, total_tasks))
+
+        # Асинхронный опрос сети
+            # Асинхронный опрос сети
+            for future in asyncio.as_completed(tasks):
+                await future  # Дожидаемся окончания конкретного запроса
+                completed_count += 1
+
+                # Обновляем прогресс-бар в графическом окне (каждые 10 запросов, чтобы интерфейс летал)
+                if completed_count % 10 == 0 or completed_count == total_tasks:
+                    if hasattr(obj, 'result_display') and obj.result_display:
+                        # Удаляем старую строчку прогресса и пишем новую на её место
+                        cursor = obj.result_display.textCursor()
+                        cursor.movePosition(cursor.MoveOperation.End)
+                        cursor.select(cursor.SelectionType.LineUnderCursor)
+                        cursor.removeSelectedText()
+
+                        # Вставляем обновленный текст прогресса
+                        cursor.insertText(get_ui_progress_text(completed_count, total_tasks))
+
+                        # Секретный фикс: принудительно заставляем PyQt перерисовать виджет на экране прямо сейчас
+                        QCoreApplication.processEvents()
+
+        # === КОНЕЦ ЦИКЛА (Сканирование успешно завершено!) ===
+
+        # Формируем сообщение индикатора
+        msg_finished = f"[📊] Сетевой движок завершил работу. Сырое множество содержит: {len(valid_endpoints)} элементов."
+
+        # Извлекаем 3 элемента (marker, path, status), которые реально возвращает ядро
         sanitized_results = []
-        for item in valid_endpoints:
-            marker, path, status, *extra = item
+        for marker, path, status in valid_endpoints:
             sanitized_results.append((marker, path, status))
 
+        # Сортируем результаты по типу маркера (API/WEB) и алфавиту путей
         sorted_results = sorted(list(set(sanitized_results)), key=lambda x: (x, x))
 
-        # УНИВЕРСАЛЬНАЯ РАСПАКОВКА: маркер, путь и статус забираем строго,
-        # а все остальные скрытые элементы (если они есть) уходят в список extra
+        # Формируем красивую структуру для сохранения в JSON
         json_endpoints = []
-        for item in sorted_results:
-            marker, path, status, *extra = item
-            # Собираем красивую строку для PyQt6 QComboBox:
-            note = f" | Заметка: {extra[0]}" if extra else ""
-            json_endpoints.append(f"[{marker}] {path} (Код: {status}){note}")
+        for marker, path, status in sorted_results:
+            json_endpoints.append(f"[{marker}] {path} (Код: {status})")
 
         try:
             os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
             with open(output_json_path, "w", encoding="utf-8") as json_file:
                 json.dump(json_endpoints, json_file, indent=4, ensure_ascii=False)
-            print(f"[💾] Тотальная карта безопасности сохранена: {output_json_path}")
+            obj.result_display.append(f"[💾] Тотальная карта безопасности сохранена: {output_json_path}")
         except Exception as e:
-            print(f"[❌] Ошибка сохранения JSON: {e}")
+            logger.error(f"[❌] Ошибка сохранения JSON: {e}")
 
-        # Печать красивой итоговой таблицы безопасности С КОДАМИ ОТВЕТОВ!
-        print(f"\n[🎉] Сканирование успешно завершено! В таблице отображено целей: {len(sorted_results)}")
-        print("=" * 90)
-        print(f"{'№':<3} | {'ТИП':<5} | {'КОД':<5} | {'ПОЯСНЕНИЕ':<18} | {'ЭНДПОИНТ ДЛЯ ТЕСТИРОВАНИЯ БЕЗОПАСНОСТИ'}")
-        print("-" * 90)
+        # === ВЫВОД КРАСИВОЙ ТАБЛИЦЫ В ГРАФИЧЕСКИЙ ИНТЕРФЕЙС ===
+        msg_success = f"\n[🎉] Сканирование успешно завершено! В таблице отображено целей: {len(sorted_results)}"
+
+        # Шапка таблицы
+        line_equal = "=" * 75
+        line_dash = "-" * 75
+        header_text = f"{'№':<3} | {'ТИП':<5} | {'КОД':<5} | {'ПОЯСНЕНИЕ':<18} | {'ЭНДПОИНТ ДЛЯ ТЕСТИРОВАНИЯ БЕЗОПАСНОСТИ'}"
+
+        # Выводим старт таблицы в интерфейс UI
+        if hasattr(obj, 'result_display') and obj.result_display:
+            obj.result_display.append("")  # Перенос строки после индикатора прогресса
+            obj.result_display.append(msg_finished)
+            obj.result_display.append(msg_success)
+            obj.result_display.append(line_equal)
+            obj.result_display.append(header_text)
+            obj.result_display.append(line_dash)
+
+        # Построчно выводим каждую цель в консоль и UI
         for index, (marker, path, status) in enumerate(sorted_results, 1):
             if status in [401, 403]:
                 note = "Защищен (Token Req)"
@@ -334,17 +441,27 @@ async def main_async_scan(target_url, output_json_path):
             else:
                 note = f"Статус {status}"
 
-            print(f"{index:<3} | {marker:<5} | {status:<5} | {note:<18} | {path}")
-        print("=" * 90)
+            # Форматируем строку
+            row_text = f"{index:<3} | {marker:<5} | {status:<5} | {note:<18} | {path}"
 
-def run_security_api_scan(target_url, output_json_path=None):
+            if hasattr(obj, 'result_display') and obj.result_display:
+                obj.result_display.append(row_text)
+
+        # Закрываем таблицу
+        if hasattr(obj, 'result_display') and obj.result_display:
+            obj.result_display.append(line_equal)
+
+def run_security_api_scan(obj, output_json_path=None):
     """Синхронный инициализатор асинхронного ядра."""
     if output_json_path is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         output_json_path = os.path.join(current_dir, "endpoints_config.json")
 
-    print(f"[🔄] Инициализация УНИВЕРСАЛЬНОГО ЭКСПРЕСС-ФАЗЗЕРА...")
-    asyncio.run(main_async_scan(target_url, output_json_path))
+    obj.result_display.append(f"[🔄] Инициализация УНИВЕРСАЛЬНОГО ЭКСПРЕСС-ФАЗЗЕРА...")
+
+    target_url = obj.base_url_input.text() # Базовый путь для сканирования
+
+    asyncio.run(main_async_scan(obj, target_url, output_json_path))
 
 
 if __name__ == "__main__":

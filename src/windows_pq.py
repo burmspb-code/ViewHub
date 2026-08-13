@@ -17,7 +17,7 @@ from src.core.logger import QTextEditHandler
 from src.core.resources import load_app_icon
 from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
                              TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
-from src.services import auth_on_click, request_on_click
+from src.services import auth_on_click, request_on_click, scanning_on_click
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -58,7 +58,6 @@ class MainWindow(QWidget):
         self.btn_back = None  # Кнопка возврата в меню
         self.page_auth = None
 
-
         # Навигация настроек
         self.btn_settings_menu = None
         self.btn_back_settings = None
@@ -66,6 +65,13 @@ class MainWindow(QWidget):
         # Элементы полей настроек (для примера предустановок)
         self.timeout_input = None
         self.btn_save_settings = None
+
+        # Навигация сканирования
+        self.btn_scanning_menu = None
+        self.base_url_input = None
+        self.btn_back_scanning = None
+        self.page_scanning = None
+        self.btn_send_scanning = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -139,6 +145,11 @@ class MainWindow(QWidget):
         self.btn_request_menu.setMinimumHeight(45)
         self.btn_request_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_request_menu)
+
+        self.btn_scanning_menu = QPushButton("📡  СКАНИРОВАНИЕ")
+        self.btn_scanning_menu.setMinimumHeight(45)
+        self.btn_scanning_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_layout.addWidget(self.btn_scanning_menu)
 
         self.btn_settings_menu = QPushButton("⚙️  НАСТРОЙКИ")
         self.btn_settings_menu.setMinimumHeight(45)
@@ -276,6 +287,35 @@ class MainWindow(QWidget):
         request_layout.addStretch()
         self.stack.addWidget(self.page_request)
 
+        # ==========================================
+        # СТРАНИЦА 5: ОКНО СКАНИРОВАНИЯ
+        # ==========================================
+        self.page_scanning = QWidget()
+        scanning_layout = QVBoxLayout(self.page_scanning)
+        scanning_layout.setContentsMargins(0, 0, 0, 0)
+        scanning_layout.setSpacing(5)
+
+        self.btn_back_scanning = QPushButton("←  Назад к меню")
+        self.btn_back_scanning.setStyleSheet(BACK_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_back_scanning)
+        scanning_layout.addSpacing(5)
+
+        scanning_layout.addWidget(QLabel("Базовый URL:"))
+        self.base_url_input = QLineEdit()
+        self.base_url_input.setPlaceholderText("https://base-url")
+        self.base_url_input.setFixedHeight(35)
+        scanning_layout.addWidget(self.base_url_input)
+        scanning_layout.addSpacing(5)
+
+        self.btn_send_scanning = QPushButton("НАЧАТЬ")
+        self.btn_send_scanning.setMinimumHeight(42)
+        self.btn_send_scanning.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_scanning.setStyleSheet(SUBMIT_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_send_scanning)  # ИСПРАВЛЕНО: добавляем в request_layout!
+
+        scanning_layout.addStretch()
+        self.stack.addWidget(self.page_scanning)
+
         # =============== Зона 2: Результат ===============
         self.zone2 = QFrame()
         self.zone2.setStyleSheet("QFrame { background-color: #f8fafc; border-radius: 8px; }")
@@ -368,6 +408,10 @@ class MainWindow(QWidget):
         """Открыть страницу запроса."""
         self.stack.setCurrentIndex(3) # Возвращаем на индекс запроса (3)
 
+    def show_scanning_page(self):
+        """Открыть страницу сканирования."""
+        self.stack.setCurrentIndex(4) # Возвращаем на индекс сканирования (3)
+
 
     def connect_signals(self):
         """Подключение обработчиков (слотов) к сигналам виджетов."""
@@ -379,11 +423,16 @@ class MainWindow(QWidget):
         self.btn_send_auth.clicked.connect(lambda: auth_on_click(self)) # На аутентификацию
 
         # Запрос
-        self.btn_request_menu.clicked.connect(self.show_request_page)  # На форму авторизации
+        self.btn_request_menu.clicked.connect(self.show_request_page)  # На форму запроса
         self.btn_back_request.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_request.clicked.connect(lambda: request_on_click(self)) #На запрос по API
 
+        # Сканирование
+        self.btn_scanning_menu.clicked.connect(self.show_scanning_page)  # На форму сканирования
+        self.btn_back_scanning.clicked.connect(self.show_menu_page)  # Назад в меню
+        self.btn_send_scanning.clicked.connect(lambda: scanning_on_click(self))  # На сканирование
+
         # Настройки
-        self.btn_settings_menu.clicked.connect(self.show_settings_page)
+        self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек
         self.btn_back_settings.clicked.connect(self.show_menu_page)
         self.btn_save_settings.clicked.connect(self.on_save_settings_click)

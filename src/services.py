@@ -8,6 +8,7 @@ import httpx  # Изолированный и стабильный сетево�
 # и приводили к аппаратным сбоям C++ (0xC0000409).
 
 from src.auth.api_client import login_to_django
+from src.core.auto_blind_fuzzer import run_security_api_scan
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -124,3 +125,8 @@ def request_on_click(obj) -> None:
     except httpx.HTTPError as e:
         logger.error(f"Ошибка сети httpx при отправке запроса: {e}")
         obj.result_display.append(f"Критическая ошибка сети: {e}")
+
+
+def scanning_on_click(obj) -> None:
+    """Запуск универсального асинхронного экспресс-сканирования."""
+    run_security_api_scan(obj)
