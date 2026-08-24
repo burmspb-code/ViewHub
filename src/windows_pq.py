@@ -9,16 +9,15 @@
 import logging
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QTextEdit, QLabel,
                              QFrame, QSplitter, QStackedWidget)
-
 
 from src.core.logger import QTextEditHandler
 from src.core.resources import load_app_icon
 from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
                              TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
-from src.services import auth_on_click, requests_on_click
+from src.services import auth_on_click, request_on_click, scanning_on_click
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -47,27 +46,43 @@ class MainWindow(QWidget):
 
         self.import_path_input = None
         self.zone1 = None
+
+        # Навигация авторизации
+        self.btn_auth_menu = None  # кнопка Аторизация
         self.password_input = None
         self.login_input = None
         self.api_url_input = None
+        self.api_request_url_input = None
         self.btn_toggle_pass = None
         self.btn_send_auth = None
+        self.btn_back = None  # Кнопка возврата в меню
+        self.page_auth = None
 
         # Навигация настроек
         self.btn_settings_menu = None
         self.btn_back_settings = None
         self.page_settings = None
-
         # Элементы полей настроек (для примера предустановок)
         self.timeout_input = None
         self.btn_save_settings = None
 
+        # Навигация сканирования
+        self.btn_scanning_menu = None
+        self.base_url_input = None
+        self.btn_back_scanning = None
+        self.page_scanning = None
+        self.btn_send_scanning = None
+
+        # Навигация запроса
+        self.btn_request_menu = None
+        self.page_request = None
+        self.api_request_url_input = None
+        self.btn_back_request = None
+        self.btn_send_request = None
+        self.btn_request = None  # кнопка Запрос
+
         self.stack = None
         self.page_menu = None
-        self.page_auth = None
-        self.btn_auth_menu = None  # кнопка Аторизация
-        self.btn_request = None  # кнопка Запрос
-        self.btn_back = None  # Кнопка возврата в меню
 
         self.result_display = None
         self.zone2 = None
@@ -100,7 +115,6 @@ class MainWindow(QWidget):
 
         # =========== Зона 1: Взаимодействие =============
         self.zone1 = QFrame()
-        # Применяем стиль боковой панели
         self.zone1.setStyleSheet(SIDEBAR_STYLE)
 
         z1_layout = QVBoxLayout(self.zone1)
@@ -124,15 +138,22 @@ class MainWindow(QWidget):
 
         self.btn_auth_menu = QPushButton("🔐  АВТОРИЗАЦИЯ")
         self.btn_auth_menu.setMinimumHeight(45)
-        #self.btn_auth_menu.setStyleSheet("background-color: #3b82f6; color: white;")
+        self.btn_auth_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_auth_menu)
 
-        self.btn_request = QPushButton("🌐  ЗАПРОС")
-        self.btn_request.setMinimumHeight(45)
-        menu_layout.addWidget(self.btn_request)
+        self.btn_request_menu = QPushButton("🌐  ЗАПРОС")
+        self.btn_request_menu.setMinimumHeight(45)
+        self.btn_request_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_layout.addWidget(self.btn_request_menu)
+
+        self.btn_scanning_menu = QPushButton("📡  СКАНИРОВАНИЕ")
+        self.btn_scanning_menu.setMinimumHeight(45)
+        self.btn_scanning_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_layout.addWidget(self.btn_scanning_menu)
 
         self.btn_settings_menu = QPushButton("⚙️  НАСТРОЙКИ")
         self.btn_settings_menu.setMinimumHeight(45)
+        self.btn_settings_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_settings_menu)
 
         menu_layout.addStretch()
@@ -158,11 +179,13 @@ class MainWindow(QWidget):
         auth_layout.addWidget(QLabel("Адрес API:"))
         self.api_url_input = QLineEdit()
         self.api_url_input.setPlaceholderText("https://your-vps-ip/api/v1")
+        self.api_url_input.setFixedHeight(35)  # Фиксируем высоту
         auth_layout.addWidget(self.api_url_input)
 
         auth_layout.addWidget(QLabel("Логин:"))
         self.login_input = QLineEdit()
         self.login_input.setPlaceholderText("Введите логин")
+        self.login_input.setFixedHeight(35)  # Фиксируем высоту
         auth_layout.addWidget(self.login_input)
 
         auth_layout.addWidget(QLabel("Пароль:"))
@@ -172,9 +195,11 @@ class MainWindow(QWidget):
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("Введите пароль")
+        self.password_input.setFixedHeight(35)  # Фиксируем высоту
 
         self.btn_toggle_pass = QPushButton("Показать")
         self.btn_toggle_pass.setFixedWidth(75)
+        self.btn_toggle_pass.setFixedHeight(35)  # Выравниваем с полем ввода
         self.btn_toggle_pass.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle_pass.setStyleSheet(TOGGLE_PASS_BUTTON_STYLE)
 
@@ -193,10 +218,10 @@ class MainWindow(QWidget):
         self.stack.addWidget(self.page_auth)
 
         # ==========================================
-        # СТРАНИЦА 3: ОКНО НАСТРОЕК И ПРЕДУСТАНОВОК
+        # СТРАНИЦА 3: ОКНО НАСТРОЕК
         # ==========================================
         self.page_settings = QWidget()
-        settings_layout = QVBoxLayout(self.page_settings)
+        settings_layout = QVBoxLayout(self.page_settings)  # Исправлено: привязка к self.page_settings
         settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.setSpacing(10)
 
@@ -210,31 +235,86 @@ class MainWindow(QWidget):
         settings_layout.addWidget(lbl_settings_title)
         settings_layout.addSpacing(5)
 
-        # Поле предустановки: Таймаут сети
         settings_layout.addWidget(QLabel("Таймаут запросов (сек):"))
         self.timeout_input = QLineEdit()
         self.timeout_input.setPlaceholderText("7")
-        self.timeout_input.setText("7")  # Значение по умолчанию
+        self.timeout_input.setText("7")
+        self.timeout_input.setFixedHeight(35)  # Фиксируем высоту
         settings_layout.addWidget(self.timeout_input)
 
-        # Поле предустановки: Путь к папке импорта Excel/CSV (задел под Pandas)
         settings_layout.addWidget(QLabel("Папка импорта данных:"))
         self.import_path_input = QLineEdit()
         self.import_path_input.setPlaceholderText("./logs")
+        self.import_path_input.setFixedHeight(35)  # Фиксируем высоту
         settings_layout.addWidget(self.import_path_input)
 
-        # Кнопка СХРАНИТЬ НАСТРОЙКИ
         settings_layout.addSpacing(15)
         self.btn_save_settings = QPushButton("Сохранить конфигурацию")
         self.btn_save_settings.setMinimumHeight(42)
         self.btn_save_settings.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_save_settings.setStyleSheet(SUBMIT_BUTTON_STYLE)  # Используем зеленый/акцентный стиль
+        self.btn_save_settings.setStyleSheet(SUBMIT_BUTTON_STYLE)
         settings_layout.addWidget(self.btn_save_settings)
 
         settings_layout.addStretch()
-
-        # Добавляем страницу настроек в стек (она получит Индекс 2)
         self.stack.addWidget(self.page_settings)
+
+        # ==========================================
+        # СТРАНИЦА 4: ОКНО ЗАПРОСА
+        # ==========================================
+        self.page_request = QWidget()
+        request_layout = QVBoxLayout(self.page_request)  # ИСПРАВЛЕНО: теперь привязано к self.page_request!
+        request_layout.setContentsMargins(0, 0, 0, 0)
+        request_layout.setSpacing(10)
+
+        self.btn_back_request = QPushButton("←  Назад к меню")
+        self.btn_back_request.setStyleSheet(BACK_BUTTON_STYLE)
+        request_layout.addWidget(self.btn_back_request)
+        request_layout.addSpacing(5)
+
+        request_layout.addWidget(QLabel("Адрес API:"))
+        self.api_request_url_input = QLineEdit()
+        self.api_request_url_input.setPlaceholderText("https://your-vps-ip/api/v1")
+        self.api_request_url_input.setFixedHeight(35)  # Фиксируем высоту
+        request_layout.addWidget(self.api_request_url_input)  # ИСПРАВЛЕНО: добавляем правильный инпут!
+        request_layout.addSpacing(5)
+
+        self.btn_send_request = QPushButton("Отправить")
+        self.btn_send_request.setMinimumHeight(42)
+        self.btn_send_request.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_request.setStyleSheet(SUBMIT_BUTTON_STYLE)
+        request_layout.addWidget(self.btn_send_request)  # ИСПРАВЛЕНО: добавляем в request_layout!
+
+        request_layout.addStretch()
+        self.stack.addWidget(self.page_request)
+
+        # ==========================================
+        # СТРАНИЦА 5: ОКНО СКАНИРОВАНИЯ
+        # ==========================================
+        self.page_scanning = QWidget()
+        scanning_layout = QVBoxLayout(self.page_scanning)
+        scanning_layout.setContentsMargins(0, 0, 0, 0)
+        scanning_layout.setSpacing(5)
+
+        self.btn_back_scanning = QPushButton("←  Назад к меню")
+        self.btn_back_scanning.setStyleSheet(BACK_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_back_scanning)
+        scanning_layout.addSpacing(5)
+
+        scanning_layout.addWidget(QLabel("Базовый URL:"))
+        self.base_url_input = QLineEdit()
+        self.base_url_input.setPlaceholderText("https://base-url")
+        self.base_url_input.setFixedHeight(35)
+        scanning_layout.addWidget(self.base_url_input)
+        scanning_layout.addSpacing(5)
+
+        self.btn_send_scanning = QPushButton("НАЧАТЬ")
+        self.btn_send_scanning.setMinimumHeight(42)
+        self.btn_send_scanning.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_scanning.setStyleSheet(SUBMIT_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_send_scanning)  # ИСПРАВЛЕНО: добавляем в request_layout!
+
+        scanning_layout.addStretch()
+        self.stack.addWidget(self.page_scanning)
 
         # =============== Зона 2: Результат ===============
         self.zone2 = QFrame()
@@ -324,17 +404,35 @@ class MainWindow(QWidget):
         """Вернуться на главную страницу меню."""
         self.stack.setCurrentIndex(0)  # Возвращаем на индекс меню (0)
 
+    def show_request_page(self):
+        """Открыть страницу запроса."""
+        self.stack.setCurrentIndex(3) # Возвращаем на индекс запроса (3)
+
+    def show_scanning_page(self):
+        """Открыть страницу сканирования."""
+        self.stack.setCurrentIndex(4) # Возвращаем на индекс сканирования (3)
+
+
     def connect_signals(self):
         """Подключение обработчиков (слотов) к сигналам виджетов."""
         # Логика переключения страниц
+        # Авторизация
         self.btn_auth_menu.clicked.connect(self.show_auth_page)  # На форму авторизации
         self.btn_back.clicked.connect(self.show_menu_page)  # Назад в меню
-
+        self.btn_toggle_pass.clicked.connect(self.toggle_password_visibility)  # На скрыть/показать пароль
         self.btn_send_auth.clicked.connect(lambda: auth_on_click(self)) # На аутентификацию
-        self.btn_toggle_pass.clicked.connect(self.toggle_password_visibility) # На скрыть/показать пароль
 
-        self.btn_request.clicked.connect(lambda: requests_on_click(self))
+        # Запрос
+        self.btn_request_menu.clicked.connect(self.show_request_page)  # На форму запроса
+        self.btn_back_request.clicked.connect(self.show_menu_page)  # Назад в меню
+        self.btn_send_request.clicked.connect(lambda: request_on_click(self)) #На запрос по API
 
-        self.btn_settings_menu.clicked.connect(self.show_settings_page)
+        # Сканирование
+        self.btn_scanning_menu.clicked.connect(self.show_scanning_page)  # На форму сканирования
+        self.btn_back_scanning.clicked.connect(self.show_menu_page)  # Назад в меню
+        self.btn_send_scanning.clicked.connect(lambda: scanning_on_click(self))  # На сканирование
+
+        # Настройки
+        self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек
         self.btn_back_settings.clicked.connect(self.show_menu_page)
         self.btn_save_settings.clicked.connect(self.on_save_settings_click)
