@@ -2,13 +2,16 @@
 
 import json
 import logging
+from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
+from PyQt6.QtWidgets import QMessageBox
+from src.parser_worker import ParserWorker
 
 # Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
 # и приводили к аппаратным сбоям C++ (0xC0000409).
 from src.auth.api_client import login_to_django
-from src.core.auto_blind_fuzzer import run_security_api_scan
+from src.auto_blind_fuzzer import run_security_api_scan
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -69,7 +72,7 @@ def request_on_click(obj) -> None:
     Returns:
         None
     """
-    # 1. Проверяем, авторизован ли пользователь
+    # Проверяем, авторизован ли пользователь
     base_url = getattr(obj, "base_url", None)
     token = getattr(obj, "auth_token", None)
 
@@ -78,7 +81,7 @@ def request_on_click(obj) -> None:
         obj.result_display.append("Статус: Запрос отклонен. Требуется авторизация.")
         return
 
-    # 2. Достаем полный URL эндпоинта из правильного виджета
+    # Достаем полный URL эндпоинта из правильного виджета
     full_url = obj.api_request_url_input.text().strip()
 
     if not full_url:
@@ -86,7 +89,7 @@ def request_on_click(obj) -> None:
         obj.result_display.append("Статус: Запрос отклонен. Требуется эндпоинт.")
         return
 
-    # 3. Передаем JWT-токен с правильным префиксом Bearer
+    # Передаем JWT-токен с правильным префиксом Bearer
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
@@ -133,8 +136,97 @@ def scanning_on_click(obj) -> None:
 
 
 def parsing_on_click(obj) -> None:
-    """Запуск парсинга выбранногосайта."""
-    pass
+    """Запуск парсинга выбранного сайта в фоновом потоке."""
+    # 1. Считываем данные из текстовых полей переданного UI-объекта
+    target_url = obj.target_url_input.text().strip()
+    brand_keyword = obj.key_word_input.text().strip()
+
+    # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
+    if not target_url:
+        with suppress(Exception):
+            obj.target_url_input.setStyleSheet("border: 1px solid #ef4444;")
+        return
+
+    # Сбрасываем красную рамку, если ссылка введена
+    with suppress(Exception):
+        obj.target_url_input.setStyleSheet("")
+
+    # 2. Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(False)
+        obj.btn_send_parsing.setText("⏳ Запуск...")
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(False)
+
+    # 3. Создаем экземпляр фонового потока
+    # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
+    obj.parser_thread = ParserWorker(
+        target_url=target_url,
+        internal_catalog_path="Внутренний_прайс.xlsx",  # Базовый Excel-файл вашей компании
+        brand_keyword=brand_keyword,
+    )
+
+    # 4. Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
+    obj.parser_thread.progress_signal.connect(
+        lambda msg: _update_parsing_status(obj, msg)
+    )
+    obj.parser_thread.finished_signal.connect(
+        lambda path: _parsing_success_handler(obj, path)
+    )
+    obj.parser_thread.error_signal.connect(
+        lambda err: _parsing_failure_handler(obj, err)
+    )
+
+    # 5. Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    obj.parser_thread.start()
+
+
+# --- Внутренние вспомогательные функции для обработки сигналов потока ---
+
+
+def _update_parsing_status(obj, message: str) -> None:
+    """Обновляет текст на кнопке в процессе парсинга."""
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setText(message)
+
+
+def _parsing_success_handler(obj, output_file: str) -> None:
+    """Вызывается автоматически при успешном завершении парсинга."""
+    # Разблокируем интерфейс обратно
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(True)
+        obj.btn_send_parsing.setText("🤖 Запустить парсинг")
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(True)
+
+    # Показываем менеджеру красивое всплывающее окно об успешном завершении
+    msg_box = QMessageBox(obj.page_parsing if obj.page_parsing else None)
+    msg_box.setIcon(QMessageBox.Icon.Information)
+    msg_box.setWindowTitle("Успех")
+    msg_box.setText("📊 Анализ рынка успешно завершен!")
+    msg_box.setInformativeText(f"Финальный отчет с готовой стратегией продаж сохранен в файл:\n\n{output_file}")
+    msg_box.exec()
+
+
+def _parsing_failure_handler(obj, error_message: str) -> None:
+    """Вызывается автоматически, если парсер столкнулся со сбоем."""
+    # Возвращаем интерфейс в рабочее состояние, чтобы менеджер мог исправить данные
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(True)
+        obj.btn_send_parsing.setText("❌ Сбой. Повторить?")
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(True)
+
+    # Выводим всплывающее окно с ошибкой
+    msg_box = QMessageBox(obj.page_parsing if obj.page_parsing else None)
+    msg_box.setIcon(QMessageBox.Icon.Critical)
+    msg_box.setWindowTitle("Ошибка парсинга")
+    msg_box.setText("Не удалось собрать данные с сайта.")
+    msg_box.setInformativeText(f"Детали ошибки:\n{error_message}\n\nПроверьте интернет-соединение или корректность ссылки.")
+    msg_box.exec()
 
 
 

@@ -95,6 +95,7 @@ class MainWindow(QWidget):
         self.target_url_input = None
         self.btn_send_parsing = None
         self.btn_parsing_menu = None
+        self.key_word_input = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -321,6 +322,13 @@ class MainWindow(QWidget):
         self.target_url_input.setPlaceholderText("https://target-url")
         self.target_url_input.setFixedHeight(35)
         parsing_layout.addWidget(self.target_url_input)
+        parsing_layout.addSpacing(5)
+
+        parsing_layout.addWidget(QLabel("Ключевая фраза:"))
+        self.key_word_input = QLineEdit()
+        self.key_word_input.setPlaceholderText("Key word")
+        self.key_word_input.setFixedHeight(35)
+        parsing_layout.addWidget(self.key_word_input)
         parsing_layout.addSpacing(5)
 
         self.btn_send_parsing = QPushButton("НАЧАТЬ")
