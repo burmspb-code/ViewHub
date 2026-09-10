@@ -9,14 +9,29 @@
 import logging
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                             QLineEdit, QPushButton, QTextEdit, QLabel,
-                             QFrame, QSplitter, QStackedWidget)
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSplitter,
+    QStackedWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.core.logger import QTextEditHandler
 from src.core.resources import load_app_icon
-from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
-                             TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
+from src.core.styles import (
+    BACK_BUTTON_STYLE,
+    GLOBAL_STYLE,
+    LOG_DISPLAY_STYLE,
+    SIDEBAR_STYLE,
+    SUBMIT_BUTTON_STYLE,
+    TOGGLE_PWD_VISIBILITY_STYLE,
+)
 from src.services import auth_on_click, request_on_click, scanning_on_click
 
 logger = logging.getLogger()
@@ -201,7 +216,7 @@ class MainWindow(QWidget):
         self.btn_toggle_pass.setFixedWidth(75)
         self.btn_toggle_pass.setFixedHeight(35)  # Выравниваем с полем ввода
         self.btn_toggle_pass.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_toggle_pass.setStyleSheet(TOGGLE_PASS_BUTTON_STYLE)
+        self.btn_toggle_pass.setStyleSheet(TOGGLE_PWD_VISIBILITY_STYLE)
 
         pass_layout.addWidget(self.password_input)
         pass_layout.addWidget(self.btn_toggle_pass)
@@ -380,7 +395,8 @@ class MainWindow(QWidget):
 
         logger.info(f"Конфигурация обновлена: Таймаут={timeout_val}с, Путь импорта='{path_val}'")
         self.result_display.append(
-            f"[⚙️ CONFIG] Успешно сохранены предустановки:\n- Network Timeout: {timeout_val} seconds\n- Data Directory: {path_val}")
+            f"[⚙️ CONFIG] Успешно сохранены предустановки:"
+            f"\n- Network Timeout: {timeout_val} seconds\n- Data Directory: {path_val}")
 
         # После сохранения красиво возвращаем пользователя в меню
         self.show_menu_page()

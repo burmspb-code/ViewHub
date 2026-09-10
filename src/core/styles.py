@@ -78,30 +78,30 @@ SIDEBAR_STYLE = """
 
 # Стиль кнопки возврата "Назад"
 BACK_BUTTON_STYLE = """
-    QPushButton { 
-        background-color: transparent; 
-        color: #94a3b8; 
-        border: none; 
-        text-align: left; 
-        padding: 5px 0px; 
+    QPushButton {
+        background-color: transparent;
+        color: #94a3b8;
+        border: none;
+        text-align: left;
+        padding: 5px 0px;
     }
-    QPushButton:hover { 
-        color: #f8fafc; 
+    QPushButton:hover {
+        color: #f8fafc;
     }
 """
 
 # Стиль компактной кнопки "Показать" пароль
-TOGGLE_PASS_BUTTON_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;"
+TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;" # noqa: S105
 
 # Зеленая акцентная кнопка "Войти"
 SUBMIT_BUTTON_STYLE = "background-color: #10b981; color: white;"
 
 # Темный "хакерский" стиль для консоли логов (Зона 3)
 LOG_DISPLAY_STYLE = """
-    QTextEdit { 
-        background-color: #0f172a; 
-        color: #38bdf8; 
-        font-family: 'Consolas', 'Courier New', monospace; 
+    QTextEdit {
+        background-color: #0f172a;
+        color: #38bdf8;
+        font-family: 'Consolas', 'Courier New', monospace;
         font-size: 12px;
         border: 1px solid #1e293b;
     }

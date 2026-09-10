@@ -20,3 +20,55 @@ dependencies = [
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.16.6,<0.17.0)"
+]
+
+[tool.ruff]
+# Минимально необходимая версия Ruff (хорошая практика для фиксации окружения)
+required-version = ">=0.5.0"
+
+# Список исключений: папки окружения, миграции и ваш settings.py
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    "**/migrations/*.py",
+    # Укажите точный путь к вашему settings.py от корня проекта:
+    "config/settings.py",
+]
+line-length = 120
+# Настройки линтера (анализатора кода)
+[tool.ruff.lint]
+# Стандартный набор правил для профессионального Django-проекта
+select = [
+    "E",   # Ошибки стиля кода (pycodestyle errors)
+    "W",   # Предупреждения стиля кода (pycodestyle warnings)
+    "F",   # Логические ошибки и дефекты (Pyflakes)
+    "I",   # Автоматическая сортировка импортов (замена isort)
+    "S",   # Проверка безопасности (Bandit) — найдет жестко зашитые пароли
+    "B",   # Поиск потенциальных багов и подводных камней (flake8-bugbear)
+    "DJ",  # Специфичные правила для Django (flake8-django)
+    "RUF", # Собственные полезные правила разработчиков Ruff
+]
+
+# Правила, которые мы сознательно отключаем (если нужно)
+ignore = [
+        "S101",   # Разрешаем использовать assert в тестах
+        "RUF001", # Игнорировать русскую раскладку в самом коде
+        "RUF002", # Игнорировать русскую раскладку в докстрингах
+        "RUF003", # Игнорировать русскую раскладку в комментариях (#)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# Настройки для автоматической сортировки импортов (секция I)
+[tool.ruff.lint.isort]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+# Укажите через запятую имена всех ваших Django-приложений в проекте:
+# known-first-party = ["routines", "users"]

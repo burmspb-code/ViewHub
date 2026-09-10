@@ -1,9 +1,10 @@
 import asyncio
-import httpx
 import re
 import uuid
-from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
+import httpx
+from bs4 import BeautifulSoup
 
 DEBUG_MODE = True
 
@@ -40,7 +41,8 @@ async def scan_black_box_api(base_url: str):
 
         # --- ЭТАП 1: УМНЫЙ СБОР ЗАЦЕПОК (Spidering) ---
         try:
-            if DEBUG_MODE: print(f"[📡] Подключение к цели: {base_url}")
+            if DEBUG_MODE:
+                print(f"[📡] Подключение к цели: {base_url}")
             response = await client.get(base_url, timeout=5.0)
 
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -73,94 +75,106 @@ async def scan_black_box_api(base_url: str):
             print(f"[⚠️] Корень недоступен: {e}")
 
         # Базовый ИИ-словарь для СНГ-разработки и стандартных API (добавляем к найденным)
-        global_standards = {
-            "api", "v1", "v2", "auth", "users", "aurora", "lessons",
-            "courses", "shop", "main", "dashboard", "catalog"
-        }
-        detected_modules.update(global_standards)
-
-        print(f"[🧠] Определены модули для построения матрицы: {list(detected_modules)}")
+        # detected_modules.update(global_standards)
 
         # --- ЭТАП 2: ФИНГЕРПРИНТИНГ ДЛЯ БОРЬБЫ С ФЕЙКАМИ ---
         print("[🔄] Анализ ложных срабатываний (Калибровка детекторов ошибок)...")
         # Получаем эталонные слепки ложных страниц для корня и для админки
         root_fingerprint = await get_soft_404_fingerprint(client, base_url, prefix="")
-        admin_fingerprint = await get_soft_404_fingerprint(client, base_url, prefix="/admin")
+        await get_soft_404_fingerprint(client, base_url, prefix="/admin")
 
-        # --- ЭТАП 3: СНАЙПЕРСКАЯ REGEX-МАТРИЦА (Версия 5.2 — e-Commerce & Slug Оптимизация) ---
+        # =========================================================================
+        # --- ЭТАП 3: АВТОНОМНАЯ СНАЙПЕРСКАЯ МАТРИЦА (Версия 5.3) ---
+        # =========================================================================
         generic_actions = [
             "", "list", "all", "create", "add", "edit", "update", "delete", "remove", "refresh",
             "create-api", "update-api", "delete-api", "delete-image"
         ]
         generic_pks = ["1", "2"]
-        # Тестовые слаги для поиска карточек товаров/категорий в NeoMarket и ViewHub
         generic_slugs = ["test", "sample", "item", "product", "category"]
 
-        # Сущности бизнес-логики (Включаем CRM, Онлайн-школы и полноценный e-Commerce для NeoMarket)
+        # НАШ ПРЕДЗАГРУЖЕННЫЙ БАЗОВЫЙ СЛОВАРЬ (Бизнес-сущности + ИБ-токены)
         business_entities = [
             "task", "tasks", "bookmark", "bookmarks", "daily", "todo", "courses", "lessons",
             "product", "products", "category", "categories", "catalog", "shop", "cart", "orders", "vendor"
         ]
-        # Служебные ИБ-токены и экшены авторизации
         auth_tokens = [
             "auth", "login", "register", "logout", "token", "refresh", "me", "profile", "payments",
             "password-reset", "password-reset/done", "password-reset/confirm"
         ]
 
+        # --- 📦 КРАСИВЫЙ ИЗОЛИРОВАННЫЙ ВЫВОД ИНФОРМАЦИИ ---
+        print("\n" + "=" * 90)
+        print("[🧠 СТАТУС СБОРА ЗАЦЕПОК И СЛОВАРЕЙ]")
+        print("=" * 90)
+
+        # Теперь здесь будут ТОЛЬКО те модули, которые скрипт РЕАЛЬНО распарсил из HTML/скриптов
+        discovered_modules = sorted(list(set(m.strip("/") for m in detected_modules if m and m != "__debug__")))
+        print("[🔹] ОБНАРУЖЕННЫЕ ЖИВЫЕ МОДУЛИ (Приложения сайта):")
+        if discovered_modules:
+            for m in discovered_modules:
+                print(f"    └── /{m}/")
+        else:
+            print("    └── (Живых модулей на главной странице не обнаружено)")
+
+        print("-" * 50)
+
+        print("[🔸] ПРЕДЗАГРУЖЕННЫЙ ИИ-СЛОВАРЬ ДЛЯ ПОИСКА СКРЫТЫХ ЗОН:")
+        print(f"    ├── Бизнес-сущности ({len(business_entities)} шт.): {', '.join(business_entities[:6])}...")
+        print(f"    ├── ИБ-токены/Авторизация ({len(auth_tokens)} шт.): {', '.join(auth_tokens[:5])}...")
+        print(
+            f"    └── Стандартные HTTP-действия ({len(generic_actions)} шт.):"
+            f" {', '.join(filter(None, generic_actions[:5]))}..."
+        )
+        print("=" * 90 + "\n")
+
+        # --- СБОРКА И МАТРИЧНАЯ ГЕНЕРАЦИЯ ПУТЕЙ ---
         generated_paths = set()
         generated_paths.add("/admin/")
 
-        # Все модули, которые нашел Spider на 1 этапе
-        discovered_modules = [m.strip("/") for m in detected_modules if m and m != "__debug__"]
+        # ЖЕСТКИЕ ПРЕФИКСЫ ДЛЯ ГЛУБОКОГО REST-ПРОБИВА (Зашиваем их сюда, чтобы они не портили discovered_modules)
+        target_prefixes = ["users", "auth", "api", "v1", "v2", "aurora"]
 
-        # 1. ПЛОСКАЯ И ДВУХУРОВНЕВАЯ ГЕНЕРАЦИЯ (Для стандартных и SEO-монолитных роутов)
+        # 1. ПЛОСКАЯ И ДВУХУРОВНЕВАЯ ГЕНЕРАЦИЯ (Используем discovered_modules)
         for mod in discovered_modules:
             generated_paths.add(f"/{mod}/")
             for action in generic_actions:
-                if action: generated_paths.add(f"/{mod}/{action}/")
+                if action:
+                    generated_paths.add(f"/{mod}/{action}/")
             for pk in generic_pks:
                 generated_paths.add(f"/{mod}/{pk}/")
 
-            # --- ПРОБИВ СЛАГОВ ДЛЯ МАРКЕТПЛЕЙСОВ ---
-            # Накрывает роуты вида: /product/test/, /product/test/edit/, /product/test/delete-image/
             for slug in generic_slugs:
                 generated_paths.add(f"/{mod}/{slug}/")
                 for action in ["edit", "update", "delete", "delete-image"]:
                     generated_paths.add(f"/{mod}/{slug}/{action}/")
 
-            # Скрещиваем найденный модуль со стандартными сущностями (Например: /daily/task/, /api/v1/product/)
             for ent in business_entities:
-                if mod == ent: continue
+                if mod == ent:
+                    continue
                 base_2 = f"/{mod}/{ent}"
                 generated_paths.add(f"{base_2}/")
                 for action in generic_actions:
-                    if action: generated_paths.add(f"{base_2}/{action}/")
+                    if action:
+                        generated_paths.add(f"{base_2}/{action}/")
                 for pk in generic_pks:
                     generated_paths.add(f"{base_2}/{pk}/")
-                # Поддержка слагов на втором уровне вложенности (Например: /catalog/product/test/)
                 for slug in generic_slugs:
                     generated_paths.add(f"{base_2}/{slug}/")
 
-        # 2. СНАЙПЕРСКИЙ ПРОБИВ АНОМАЛЬНОЙ ВЛОЖЕННОСТИ (Бьем точно по users/auth/api)
-        # Глубокие цепочки строим ТОЛЬКО если в них участвуют префиксы авторизации или API
-        target_prefixes = ["users", "auth", "api", "v1", "v2", "aurora"]
-
+        # 2. СНАЙПЕРСКИЙ ПРОБИВ АНОМАЛЬНОЙ ВЛОЖЕННОСТИ
         for p1 in target_prefixes:
             for p2 in target_prefixes:
-                if p1 == p2: continue
-                # Цепочки уровня 2 (Например: /api/v1/, /users/auth/, /users/api/)
+                if p1 == p2:
+                    continue
                 generated_paths.add(f"/{p1}/{p2}/")
-
-                # Цепочки уровня 3 (Например: /users/api/v1/, /api/v1/auth/)
                 for p3 in target_prefixes:
-                    if p3 in [p1, p2]: continue
+                    if p3 in [p1, p2]:
+                        continue
                     base_3 = f"/{p1}/{p2}/{p3}"
                     generated_paths.add(f"{base_3}/")
-
-                    # Насаживаем экшены авторизации на глубокие префиксы
                     for token in auth_tokens:
                         generated_paths.add(f"{base_3}/{token}/")
-                        # Уровень 4 (Тот самый уродливый случай: /users/api/v1/auth/login/)
                         generated_paths.add(f"/{p1}/{p2}/{p3}/auth/{token}/")
                         generated_paths.add(f"/{p1}/{p2}/{p3}/{token}/")
 
@@ -175,11 +189,12 @@ async def scan_black_box_api(base_url: str):
         auth_patterns = re.compile(r'(login|register|auth|password-reset|me|payments)')
         bug_path_check = "/users/api/v1/auth/login/"
         print(
-            f"[🔍 REGEX ПРОВЕРКА] Присутствует ли /users/api/v1/auth/login/ в матрице? -> {bug_path_check in generated_paths}")
-
+            f"[🔍 REGEX ПРОВЕРКА] Присутствует ли /users/api/v1/auth/login/ в матрице? ->"
+            f" {bug_path_check in generated_paths}")
         # --- ЭТАП 4: АКТИВНОЕ ВАЛИДИРОВАННОЕ ЗОНДИРОВАНИЕ С REGEX ФИЛЬТРАЦИЕЙ ---
         async def check_endpoint(path):
-            if not path.startswith("/"): return None
+            if not path.startswith("/"):
+                return None
             full_url = urljoin(base_url, path)
 
             # Regex для отслеживания целевых путей в логах
@@ -209,7 +224,8 @@ async def scan_black_box_api(base_url: str):
                         root_len = root_fingerprint.get("len", 0)
                         if root_len > 0 and path != "/":
                             diff = abs(r_len - root_len) / root_len
-                            if diff < 0.02: return None
+                            if diff < 0.02:
+                                return None
 
                     return (path, status)
                 except httpx.HTTPError:

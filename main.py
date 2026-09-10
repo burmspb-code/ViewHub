@@ -3,7 +3,7 @@
 import sys
 import traceback
 
-from PyQt6.QtWidgets import (QApplication)
+from PyQt6.QtWidgets import QApplication
 
 from src.windows_pq import MainWindow
 

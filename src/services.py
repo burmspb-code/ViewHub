@@ -2,11 +2,11 @@
 
 import json
 import logging
+
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
 # Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
 # и приводили к аппаратным сбоям C++ (0xC0000409).
-
 from src.auth.api_client import login_to_django
 from src.core.auto_blind_fuzzer import run_security_api_scan
 

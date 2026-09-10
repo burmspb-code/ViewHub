@@ -1,7 +1,8 @@
 import re
 from urllib.parse import urljoin, urlparse
-from bs4 import BeautifulSoup
+
 import httpx
+from bs4 import BeautifulSoup
 
 # Регулярное выражение для поиска путей API в коде (например: /api/v1/users, /v2/tasks)
 API_PATTERN = re.compile(

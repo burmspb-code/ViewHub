@@ -8,11 +8,12 @@ import json
 import logging
 import os
 import re
-# Импортируем ядро Qt для управления событиями интерфейса
-from PyQt6.QtCore import QCoreApplication
 
 import httpx
 from bs4 import BeautifulSoup
+
+# Импортируем ядро Qt для управления событиями интерфейса
+from PyQt6.QtCore import QCoreApplication
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -121,7 +122,8 @@ async def test_single_path(client, target_url, path_clean, valid_endpoints, sema
                 if "<title>" in res.text.lower() and "</title>" in res.text.lower():
                     try:
                         page_title = res.text.lower().split("<title>")[1].split("</title>")[0]
-                    except: pass
+                    except Exception: # noqa: S110
+                        pass
                 if any(msg in page_title for msg in ["страница не найдена", "page not found", "404"]):
                     status_code = 404
 
@@ -132,7 +134,7 @@ async def test_single_path(client, target_url, path_clean, valid_endpoints, sema
                     # Если POST вернул любой код кроме 404 (например, 400, 401, 403, 405) — эндпоинт ЖИВОЙ!
                     if post_res.status_code != 404:
                         status_code = post_res.status_code
-                except:
+                except Exception: # noqa: S110
                     pass
 
             # Если точка ответила хоть чем-то, кроме 404 — заносим в отчет
@@ -217,7 +219,7 @@ async def main_async_scan(obj, target_url, output_json_path):
                     if api_check_res.status_code != 404:
                         api_detected_in_wild = True
                         break
-                except Exception:
+                except Exception: # noqa: S110
                     pass
 
             if api_detected_in_wild:
@@ -252,7 +254,10 @@ async def main_async_scan(obj, target_url, output_json_path):
 
         # Вывод зацепок в графическое окно PyQt/PySide
         if hasattr(obj, 'result_display') and obj.result_display:
-            if discovered_api_markers and any(m in clean_paths for m in ["api", "v1"]) if 'clean_paths' in locals() else discovered_api_markers:
+            paths = locals().get("clean_paths", [])
+            if discovered_api_markers and (
+                    not paths or any(m in paths for m in ["api", "v1"])
+            ):
                 obj.result_display.append(f"[🧠] Активные API-маркеры матрицы: {list(discovered_api_markers)}")
             if detected_apps:
                 obj.result_display.append(f"[🧠] Обнаружены уникальные модули системы: {list(detected_apps)}")
@@ -390,7 +395,10 @@ async def main_async_scan(obj, target_url, output_json_path):
         # === КОНЕЦ ЦИКЛА (Сканирование успешно завершено!) ===
 
         # Формируем сообщение индикатора
-        msg_finished = f"[📊] Сетевой движок завершил работу. Сырое множество содержит: {len(valid_endpoints)} элементов."
+        msg_finished = (
+            f"[📊] Сетевой движок завершил работу. Сырое множество содержит:"
+            f" {len(valid_endpoints)} элементов."
+        )
 
         # Извлекаем 3 элемента (marker, path, status), которые реально возвращает ядро
         sanitized_results = []
@@ -419,7 +427,11 @@ async def main_async_scan(obj, target_url, output_json_path):
         # Шапка таблицы
         line_equal = "=" * 75
         line_dash = "-" * 75
-        header_text = f"{'№':<3} | {'ТИП':<5} | {'КОД':<5} | {'ПОЯСНЕНИЕ':<18} | {'ЭНДПОИНТ ДЛЯ ТЕСТИРОВАНИЯ БЕЗОПАСНОСТИ'}"
+        header_text = (
+            f"{'№':<3} | {'ТИП':<5} |"
+            f" {'КОД':<5} | {'ПОЯСНЕНИЕ':<18} |"
+            f" {'ЭНДПОИНТ ДЛЯ ТЕСТИРОВАНИЯ БЕЗОПАСНОСТИ'}"
+        )
 
         # Выводим старт таблицы в интерфейс UI
         if hasattr(obj, 'result_display') and obj.result_display:
@@ -457,7 +469,7 @@ def run_security_api_scan(obj, output_json_path=None):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         output_json_path = os.path.join(current_dir, "endpoints_config.json")
 
-    obj.result_display.append(f"[🔄] Инициализация УНИВЕРСАЛЬНОГО ЭКСПРЕСС-ФАЗЗЕРА...")
+    obj.result_display.append("[🔄] Инициализация УНИВЕРСАЛЬНОГО ЭКСПРЕСС-ФАЗЗЕРА...")
 
     target_url = obj.base_url_input.text() # Базовый путь для сканирования
 
