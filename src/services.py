@@ -130,3 +130,11 @@ def request_on_click(obj) -> None:
 def scanning_on_click(obj) -> None:
     """Запуск универсального асинхронного экспресс-сканирования."""
     run_security_api_scan(obj)
+
+
+def parsing_on_click(obj) -> None:
+    """Запуск парсинга выбранногосайта."""
+    pass
+
+
+
