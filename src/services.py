@@ -6,12 +6,12 @@ from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 from PyQt6.QtWidgets import QMessageBox
-from src.parser_worker import ParserWorker
 
 # Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
 # и приводили к аппаратным сбоям C++ (0xC0000409).
 from src.auth.api_client import login_to_django
 from src.auto_blind_fuzzer import run_security_api_scan
+from src.parser_worker import ParserWorker
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -137,7 +137,7 @@ def scanning_on_click(obj) -> None:
 
 def parsing_on_click(obj) -> None:
     """Запуск парсинга выбранного сайта в фоновом потоке."""
-    # 1. Считываем данные из текстовых полей переданного UI-объекта
+    # Считываем данные из текстовых полей переданного UI-объекта
     target_url = obj.target_url_input.text().strip()
     brand_keyword = obj.key_word_input.text().strip()
 
@@ -151,7 +151,7 @@ def parsing_on_click(obj) -> None:
     with suppress(Exception):
         obj.target_url_input.setStyleSheet("")
 
-    # 2. Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(False)
         obj.btn_send_parsing.setText("⏳ Запуск...")
@@ -159,15 +159,14 @@ def parsing_on_click(obj) -> None:
     if obj.btn_back_parsing:
         obj.btn_back_parsing.setEnabled(False)
 
-    # 3. Создаем экземпляр фонового потока
+    # Создаем экземпляр фонового потока
     # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
     obj.parser_thread = ParserWorker(
         target_url=target_url,
-        internal_catalog_path="Внутренний_прайс.xlsx",  # Базовый Excel-файл вашей компании
         brand_keyword=brand_keyword,
     )
 
-    # 4. Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
+    # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
     obj.parser_thread.progress_signal.connect(
         lambda msg: _update_parsing_status(obj, msg)
     )
@@ -178,7 +177,7 @@ def parsing_on_click(obj) -> None:
         lambda err: _parsing_failure_handler(obj, err)
     )
 
-    # 5. Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
     obj.parser_thread.start()
 
 
@@ -205,8 +204,8 @@ def _parsing_success_handler(obj, output_file: str) -> None:
     msg_box = QMessageBox(obj.page_parsing if obj.page_parsing else None)
     msg_box.setIcon(QMessageBox.Icon.Information)
     msg_box.setWindowTitle("Успех")
-    msg_box.setText("📊 Анализ рынка успешно завершен!")
-    msg_box.setInformativeText(f"Финальный отчет с готовой стратегией продаж сохранен в файл:\n\n{output_file}")
+    msg_box.setText("📊 Парсинг сайта успешно завершен!")
+    msg_box.setInformativeText(f"Результат парсинга сохранен в файл:\n\n{output_file}")
     msg_box.exec()
 
 
@@ -225,7 +224,9 @@ def _parsing_failure_handler(obj, error_message: str) -> None:
     msg_box.setIcon(QMessageBox.Icon.Critical)
     msg_box.setWindowTitle("Ошибка парсинга")
     msg_box.setText("Не удалось собрать данные с сайта.")
-    msg_box.setInformativeText(f"Детали ошибки:\n{error_message}\n\nПроверьте интернет-соединение или корректность ссылки.")
+    msg_box.setInformativeText(
+        f"Детали ошибки:\n{error_message}\n\n"
+        f"Проверьте интернет-соединение или корректность ссылки.")
     msg_box.exec()
 
 

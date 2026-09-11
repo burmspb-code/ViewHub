@@ -1,117 +1,179 @@
 """Модуль для фонового парсинга сайтов и автоматического анализа цен."""
 
-import random
-import time
-from contextlib import suppress
+import json
+import re
+from urllib.parse import urljoin
 
-import pandas as pd
-import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
 class ParserWorker(QThread):
     """Отдельный поток для парсинга, чтобы интерфейс приложения не зависал."""
 
-    # Сигналы для безопасной передачи данных обратно в главный поток интерфейса
-    progress_signal = pyqtSignal(str)  # Передает текст текущего статуса в UI
-    finished_signal = pyqtSignal(str)  # Передает путь к созданному Excel-файлу
-    error_signal = pyqtSignal(str)  # Передает текст ошибки в случае сбоя
+    progress_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
 
-    def __init__(self, target_url: str, internal_catalog_path: str, brand_keyword: str = ""):
-        """Инициализация потока парсинга."""
+    def __init__(self, target_url: str, brand_keyword: str = ""):
         super().__init__()
         self.target_url = target_url.strip()
-        self.internal_catalog_path = internal_catalog_path.strip()
-        # Приводим к нижнему регистру для регистронезависимого поиска бренда
+        if not self.target_url.endswith("/"):
+            self.target_url += "/"
         self.brand_keyword = brand_keyword.strip().lower()
+        self.output_file = "citadel_final.json"
+
+    def is_category(self, href):
+        """Категория: /catalog/zamki/ — один сегмент после /catalog/.
+        Товар: /catalog/furnitura-raznaya-/allyur-seyf.../ — два и более."""
+        path = href.split("?")[0]
+        after_catalog = path.split("/catalog/", 1)
+        if len(after_catalog) < 2:
+            return True
+        remainder = after_catalog[1]
+        segments = [s for s in remainder.split("/") if s]
+        return len(segments) <= 1
+
+    def extract_data(self, soup, seen_hrefs):
+        items = []
+        all_links = soup.find_all("a", href=True)
+
+        for link in all_links:
+            href = link["href"]
+            text = link.get_text(strip=True)
+
+            if "/catalog/" not in href:
+                continue
+            if not text or len(text) < 10:
+                continue
+            if text.lower() in ["подробнее", "купить", "в корзину", "сравнить"]:
+                continue
+            if self.is_category(href):
+                continue
+            if re.search(r"$\d+$", text):
+                continue
+
+            full_link = urljoin(self.target_url, href)
+            if full_link in seen_hrefs:
+                continue
+
+            card = None
+            parent = link.parent
+            for _ in range(10):
+                if parent is None:
+                    break
+                if parent.name == "div" and parent.find("img"):
+                    card = parent
+                    break
+                parent = parent.parent
+
+            if card is None:
+                continue
+
+            seen_hrefs.add(full_link)
+            name = text
+
+            price = "Цена скрыта"
+            for el in card.find_all(class_=lambda x: x and "price" in str(x).lower()):
+                txt = el.get_text(strip=True)
+                if txt and re.search(r"\d", txt):
+                    price = txt
+                    break
+
+            availability = "Неизвестно"
+            card_text = card.get_text(separator=" ", strip=True).lower()
+            if "под заказ" in card_text:
+                availability = "Под заказ"
+            elif "в наличии" in card_text:
+                availability = "В наличии"
+            elif "в пути" in card_text:
+                availability = "В пути"
+            elif "нет в наличии" in card_text:
+                availability = "Нет в наличии"
+
+            code = ""
+            code_el = card.find(
+                class_=lambda x: x and any(c in str(x).lower() for c in ["code", "art", "articul", "sku"])
+            )
+            if code_el:
+                code = re.sub(
+                    r"^(Арт\.|Код|Артикул):\s*", "", code_el.get_text(strip=True), flags=re.IGNORECASE
+                ).strip()
+
+            items.append({
+                "name": name,
+                "code": code,
+                "price": price,
+                "availability": availability,
+                "link": full_link,
+            })
+
+        return items
 
     def run(self) -> None:
-        """Основной метод, который выполняется в фоновом потоке при вызове .start()."""
         try:
-            self.progress_signal.emit("🤖 Шаг 1: Скачивание страницы конкурента...")
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=False)
+                page = browser.new_page()
 
-            # Заголовки для имитации реального браузера (защита от базовых блокировок)
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
+                all_items = []
+                seen_hrefs = set()
+                current_page = 1
+                max_pages = 25
+                no_items_streak = 0
 
-            # Отправляем сетевой запрос с таймаутом в 10 секунд
-            response = requests.get(self.target_url, headers=headers, timeout=10)
-            response.raise_for_status()
+                while current_page <= max_pages:
+                    if current_page == 1:
+                        url = f"{self.target_url}catalog/?q={self.brand_keyword}"
+                    else:
+                        url = f"{self.target_url}catalog/?q={self.brand_keyword}&PAGEN_2={current_page}"
 
-            self.progress_signal.emit("🔍 Шаг 2: Извлечение и фильтрация данных...")
-            soup = BeautifulSoup(response.text, "html.parser")
+                    self.progress_signal.emit(f"📄 Страница №{current_page}")
 
-            # Находим все карточки товаров на странице
-            items = soup.find_all("div", class_="thumbnail")
+                    page.goto(url, wait_until="networkidle", timeout=60000)
 
-            competitor_data = []
-            for item in items:
-                name_title = item.find("a", class_="title")
-                price_text = item.find("h4", class_="price")
+                    try:
+                        page.wait_for_selector('a[href*="/catalog/"]', state="attached", timeout=30000)
+                        page.wait_for_timeout(2000)
+                    except PlaywrightTimeoutError:
+                        self.progress_signal.emit("❌ Ссылки не появились.")
+                        break
+                    except Exception as e:
+                        self.progress_signal.emit(f"❌ Ошибка ожидания: {e}")
+                        break
 
-                if name_title and price_text:
-                    name = name_title.get("title", name_title.text).strip()
+                    html = page.content()
+                    soup = BeautifulSoup(html, "html.parser")
+                    new_items = self.extract_data(soup, seen_hrefs)
+                    all_items.extend(new_items)
 
-                    # Фильтрация по бренду: если задан бренд и его нет в названии, пропускаем
-                    if self.brand_keyword and (self.brand_keyword not in name.lower()):
-                        continue
-
-                    # Очищаем цену от лишних символов валют и пробелов
-                    raw_price = price_text.text.replace("$", "").replace("€", "").replace("₽", "").strip()
-                    price = float(raw_price)
-
-                    competitor_data.append(
-                        {
-                            "Артикул/Модель": name,
-                            "Цена Конкурента": price,
-                            "Статус Конкурента": "В наличии"
-                        }
+                    self.progress_signal.emit(
+                        f"📦 На странице: {len(new_items)} | Всего: {len(all_items)}"
                     )
 
-            brand_info = f" по бренду '{self.brand_keyword}'" if self.brand_keyword else ""
-            self.progress_signal.emit(f"📊 Найдено {len(competitor_data)} позиций{brand_info}. Сопоставляем прайсы...")
+                    if new_items:
+                        no_items_streak = 0
+                    else:
+                        no_items_streak += 1
+                        if no_items_streak >= 2:
+                            self.progress_signal.emit("🛑 Две страницы без товаров. Конец.")
+                            break
 
-            # Небольшая пауза для плавности отображения статуса в UI
-            time.sleep(0.5)
+                    current_page += 1
 
-            if not competitor_data:
-                msg = f"Товары{brand_info} не найдены на целевой странице."
-                raise ValueError(msg)
+                browser.close()
 
-            # Переходим к анализу данных с помощью pandas
-            df_internal = pd.read_excel(self.internal_catalog_path)
-            df_competitor = pd.DataFrame(competitor_data)
+                if all_items:
+                    with open(self.output_file, "w", encoding="utf-8") as f:
+                        json.dump(all_items, f, ensure_ascii=False, indent=2)
+                    self.progress_signal.emit(f"🎉 Готово! Товаров: {len(all_items)}")
+                    self.finished_signal.emit(self.output_file)
+                else:
+                    self.error_signal.emit("⚠️ Товары не найдены.")
 
-            # Объединяем внутренний каталог компании и собранные данные конкурента
-            merged_df = pd.merge(df_internal, df_competitor, on="Артикул/Модель", how="left")
-
-            # Маркируем товары, которых не оказалось у конкурента (потенциальный дефицит на рынке)
-            merged_df["Цена Конкурента"] = merged_df["Цена Конкурента"].fillna(0)
-            merged_df["Статус Конкурента"] = merged_df["Статус Конкурента"].fillna("Нет в наличии")
-
-            # Рассчитываем разницу цен
-            merged_df["Разница (Конкурент - Мы)"] = merged_df["Цена Конкурента"] - merged_df["Наша Цена"]
-
-            # Выстраиваем интеллектуальную стратегию продаж для оптового менеджера
-            def set_strategy(row: pd.Series) -> str:
-                if row["Цена Конкурента"] == 0:
-                    return "У конкурента нет. Можно поднять цену / Дефицит"
-                if row["Разница (Конкурент - Мы)"] < 0:
-                    return "ДЕМПИНГ! Конкурент дешевле. Нужна скидка"
-                return "Наша цена выгоднее. Использовать в УТП"
-
-            merged_df["Стратегия продаж"] = merged_df.apply(set_strategy, axis=1)
-
-            # Имя финального файла отчета
-            output_path = "Анализ_рынка_и_стратегия.xlsx"
-            merged_df.to_excel(output_path, index=False)
-
-            # Успешный финал: отправляем сигнал в UI и передаем путь к файлу
-            self.finished_signal.emit(output_path)
-
+        except KeyboardInterrupt:
+            self.error_signal.emit("⚠️ Остановлено.")
         except Exception as e:
-            # Безопасный перехват любых ошибок и передача их текста в интерфейс
-            self.error_signal.emit(str(e))
+            self.error_signal.emit(f"❌ Ошибка: {e}")
