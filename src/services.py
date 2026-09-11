@@ -154,10 +154,12 @@ def parsing_on_click(obj) -> None:
     # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(False)
-        obj.btn_send_parsing.setText("⏳ Запуск...")
 
     if obj.btn_back_parsing:
         obj.btn_back_parsing.setEnabled(False)
+
+    obj.result_display.append(f"⏳ Запуск парсера для сайта:{target_url}, ключ:{brand_keyword}")
+    logger.info(f"Старт парсера по адресу {target_url}")
 
     # Создаем экземпляр фонового потока
     # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
@@ -173,8 +175,8 @@ def parsing_on_click(obj) -> None:
     obj.parser_thread.finished_signal.connect(
         lambda path: _parsing_success_handler(obj, path)
     )
-    obj.parser_thread.error_signal.connect(
-        lambda err: _parsing_failure_handler(obj, err)
+    obj.parser_thread.logging_signal.connect(
+        lambda msg_err: _update_logging_status(msg_err)
     )
 
     # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
@@ -182,52 +184,28 @@ def parsing_on_click(obj) -> None:
 
 
 # --- Внутренние вспомогательные функции для обработки сигналов потока ---
-
-
 def _update_parsing_status(obj, message: str) -> None:
-    """Обновляет текст на кнопке в процессе парсинга."""
-    if obj.btn_send_parsing:
-        obj.btn_send_parsing.setText(message)
+    """Пишет служебные сообщения о парсинге в информационное окно."""
+    obj.result_display.append(message)
+
+def _update_logging_status(message: str) -> None:
+    """Выводит сообщения в окно логов."""
+    logger.info(message)
 
 
-def _parsing_success_handler(obj, output_file: str) -> None:
+def _parsing_success_handler(obj, output_file: str="") -> None:
     """Вызывается автоматически при успешном завершении парсинга."""
     # Разблокируем интерфейс обратно
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(True)
-        obj.btn_send_parsing.setText("🤖 Запустить парсинг")
 
     if obj.btn_back_parsing:
         obj.btn_back_parsing.setEnabled(True)
 
-    # Показываем менеджеру красивое всплывающее окно об успешном завершении
-    msg_box = QMessageBox(obj.page_parsing if obj.page_parsing else None)
-    msg_box.setIcon(QMessageBox.Icon.Information)
-    msg_box.setWindowTitle("Успех")
-    msg_box.setText("📊 Парсинг сайта успешно завершен!")
-    msg_box.setInformativeText(f"Результат парсинга сохранен в файл:\n\n{output_file}")
-    msg_box.exec()
+    if output_file:
+        # Показываем сообщение об успешном завершении
+        obj.result_display.append("Успех")
+        obj.result_display.append("📊 Парсинг сайта успешно завершен!")
+        obj.result_display.append(f"Результат парсинга сохранен в файл:\n\n{output_file}")
 
-
-def _parsing_failure_handler(obj, error_message: str) -> None:
-    """Вызывается автоматически, если парсер столкнулся со сбоем."""
-    # Возвращаем интерфейс в рабочее состояние, чтобы менеджер мог исправить данные
-    if obj.btn_send_parsing:
-        obj.btn_send_parsing.setEnabled(True)
-        obj.btn_send_parsing.setText("❌ Сбой. Повторить?")
-
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(True)
-
-    # Выводим всплывающее окно с ошибкой
-    msg_box = QMessageBox(obj.page_parsing if obj.page_parsing else None)
-    msg_box.setIcon(QMessageBox.Icon.Critical)
-    msg_box.setWindowTitle("Ошибка парсинга")
-    msg_box.setText("Не удалось собрать данные с сайта.")
-    msg_box.setInformativeText(
-        f"Детали ошибки:\n{error_message}\n\n"
-        f"Проверьте интернет-соединение или корректность ссылки.")
-    msg_box.exec()
-
-
-
+    logger.info("Завершение работы парсера.")
