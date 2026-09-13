@@ -5,7 +5,6 @@ import logging
 from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
-from PyQt6.QtWidgets import QMessageBox
 
 # Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
 # и приводили к аппаратным сбоям C++ (0xC0000409).
@@ -165,19 +164,16 @@ def parsing_on_click(obj) -> None:
     # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
     obj.parser_thread = ParserWorker(
         target_url=target_url,
-        brand_keyword=brand_keyword,
+        brand_keyword=brand_keyword
     )
 
     # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
     obj.parser_thread.progress_signal.connect(
         lambda msg: _update_parsing_status(obj, msg)
     )
-    obj.parser_thread.finished_signal.connect(
-        lambda path: _parsing_success_handler(obj, path)
-    )
-    obj.parser_thread.logging_signal.connect(
-        lambda msg_err: _update_logging_status(msg_err)
-    )
+    obj.parser_thread.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
+    obj.parser_thread.logging_signal.connect(lambda msg_err: _update_logging_status(msg_err))
+
 
     # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
     obj.parser_thread.start()
@@ -206,6 +202,6 @@ def _parsing_success_handler(obj, output_file: str="") -> None:
         # Показываем сообщение об успешном завершении
         obj.result_display.append("Успех")
         obj.result_display.append("📊 Парсинг сайта успешно завершен!")
-        obj.result_display.append(f"Результат парсинга сохранен в файл:\n\n{output_file}")
+        obj.result_display.append(f"Результат парсинга сохранен в файл: {output_file}\n\n")
 
     logger.info("Завершение работы парсера.")
