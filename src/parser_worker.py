@@ -23,7 +23,6 @@ class Extractor:
         Пример структуры:
         {
             "card_selector": "div.product-card", селектор карточки товара;
-            "separating_insert: "catalog/", стуктурный разделитель;
             "link_selector": "a.product-link", селектор ссылки на товар;
             "price_keywords": ["price", "cost"], ключи для поиска цены товара;
             "code_keywords": ["code", "art", "articul"], ключи для поиска актикула товара;
@@ -39,7 +38,7 @@ class Extractor:
 
 
     def _extract_from_citadel(self, soup, seen_hrefs, base_url):
-        """Логика для сайтов с карточками товаров (Цитадель)."""
+        """Извлечение данных с сайта Цитадель."""
         items = []
         # Получаем селектор карточки из конфига, если нет - ищем все ссылки
         card_selector = self.config.get("card_selector", "div")
@@ -125,147 +124,125 @@ class Extractor:
 
         return items
 
-    def _extract_from_table(self, soup, seen_hrefs, base_url):
-        """Логика для сайтов с табличным выводом (Гардарика)."""
-        items = []
-        tables = soup.find_all("table")
-
-        for table in tables:
-            rows = table.find_all("tr")
-            for row in rows:
-                cols = row.find_all("td")
-                if len(cols) < 2:
-                    continue
-
-                # Предполагаем структуру: [Код] [Название] [Шт] [Купить]
-                code_cell = cols
-                name_cell = cols
-
-                code = code_cell.get_text(strip=True)
-                name = name_cell.get_text(strip=True)
-
-                if not name:
-                    continue
-
-                # Ищем ссылку (может быть в названии или в кнопке "Купить")
-                link_tag = name_cell.find("a", href=True)
-                if not link_tag and len(cols) > 3:
-                    buy_btn = cols.find("a", href=True)
-                    link_tag = buy_btn
-
-                if not link_tag:
-                    continue
-
-                href = link_tag["href"]
-                full_link = urljoin(base_url, href)
-
-                if full_link in seen_hrefs:
-                    continue
-
-                # Для Гардарики цены нет в открытом доступе
-                items.append(
-                    {
-                        "name": name,
-                        "code": code,
-                        "price": "Цена по запросу (B2B)",
-                        "availability": "Уточняйте у менеджера",
-                        "link": full_link,
-                    }
-                )
-                seen_hrefs.add(full_link)
-
-        return items
 
 class ParserWorker(QThread):
     progress_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(str)
     logging_signal = pyqtSignal(str)
 
-    def __init__(self, target_url: str, brand_keyword: str = ""):
+    def __init__(self, target_url: str, brand_keyword: str = "", config: dict | None = None):
         super().__init__()
         self.target_url = target_url.strip()
         self.brand_keyword = brand_keyword
-        if not self.target_url.endswith("/"):
-            self.target_url += "/"
-        self.full_url = f"{self.target_url}catalog/?q={self.brand_keyword}"
         self.output_file = "result.json"
+        self.config = config or self._get_default_config()
+        self.extractor = Extractor(self.config)
 
-        # Настройка для парсинга сайта Цитадель
-        parsing_config = {
-            # Точный класс карточки товара, который мы нашли в HTML
+    def _get_default_config(self) -> dict:
+        """Возвращает дефолтную конфигурацию для парсинга."""
+        return {
             "card_selector": "div.product-title",
-            # Ключевые слова для поиска цены (нужно авторизовываться).
             "price_keywords": ["price", "cost", "sum", "val", "price-block"],
-            # Ключевые слова для поиска артикула
             "code_keywords": ["code", "art", "articul", "sku", "number", "Арт"],
             "is_table_layout": False,
+            "separating_insert": "catalog/",
         }
 
-        self.extractor = Extractor(parsing_config)
+    def _build_url(self, page: int = 1) -> str:
+        """Строит URL для указанной страницы."""
+        base_url = self.target_url.rstrip("/") + "/"
+        url = f"{base_url}catalog/?q={self.brand_keyword}"
+        if page > 1:
+            url += f"&PAGEN_2={page}"
+        return url
 
-    def run(self) -> None:
+    def _wait_for_content(self, page) -> bool:
+        """Ожидает загрузки контента на странице."""
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=False)
-                page = browser.new_page()
+            page.wait_for_selector('a[href*="/catalog/"]', state="attached", timeout=30000)
+            page.wait_for_timeout(2000)
+            return True
+        except PlaywrightTimeoutError:
+            self.progress_signal.emit("❌ Ссылки не появились. Завершаем цикл.")
+            return False
+        except Exception as e:
+            self.logging_signal.emit(f"❌ Ошибка ожидания: {e}")
+            return False
 
-                all_items = []
-                seen_hrefs = set()
-                current_page = 1
-                max_pages = 25
+    def _parse_page(self, page, seen_hrefs: set) -> list:
+        """Парсит одну страницу и возвращает найденные товары."""
+        html = page.content()
+        soup = BeautifulSoup(html, "html.parser")
+        return self.extractor.extract(soup, seen_hrefs, self.target_url)
+
+    def _save_results(self, items: list) -> bool:
+        """Сохраняет результаты в файл."""
+        if not items:
+            return False
+        try:
+            with open(self.output_file, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+            return True
+        except IOError as e:
+            self.logging_signal.emit(f"❌ Ошибка записи файла: {e}")
+            return False
+
+    def _run_pagination(self, page) -> list:
+        """Выполняет пагинацию и собирает все товары."""
+        all_items = []
+        seen_hrefs = set()
+        current_page = 1
+        max_pages = 25
+        no_items_streak = 0
+
+        while current_page <= max_pages:
+            url = self._build_url(current_page)
+            self.progress_signal.emit(f"📄 Страница №{current_page}: {url}")
+            page.goto(url, wait_until="networkidle", timeout=60000)
+
+            if not self._wait_for_content(page):
+                break
+
+            new_items = self._parse_page(page, seen_hrefs)
+            all_items.extend(new_items)
+
+            if new_items:
+                self.progress_signal.emit(f"📦 На странице: {len(new_items)} | Всего: {len(all_items)}")
                 no_items_streak = 0
+            else:
+                no_items_streak += 1
+                if no_items_streak >= 2:
+                    self.progress_signal.emit("🛑 Конец по условию - две страницы без товаров.")
+                    break
 
-                while current_page <= max_pages:
-                    # Формируем URL. Логика пагинации может отличаться.
-                    url = self.full_url
-                    if current_page != 1:
-                        url = f"{self.full_url}&PAGEN_2={current_page}"
+            current_page += 1
 
-                    self.progress_signal.emit(f"📄 Страница №{current_page}: {url}")
-                    page.goto(url, wait_until="networkidle", timeout=60000)
+        return all_items
 
-                    try:
-                        # Универсальный селектор ожидания. Можно тоже вынести в конфиг экстрактора
-                        page.wait_for_selector('a[href*="/catalog/"]', state="attached", timeout=30000)
-                        page.wait_for_timeout(2000)
-                    except PlaywrightTimeoutError:
-                        self.progress_signal.emit("❌ Ссылки не появились. Завершаем цикл.")
-                        break
-                    except Exception as e:
-                        self.logging_signal.emit(f"❌ Ошибка ожидания: {e}")
-                        break
+    def run_citadel(self) -> None:
+        """Парсинг сайта Цитадель."""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False)
+            page = browser.new_page()
 
-                    html = page.content()
-                    soup = BeautifulSoup(html, "html.parser")
+            try:
+                all_items = self._run_pagination(page)
 
-
-                    # ВЫЗОВ ЭКСТРАКТОРА
-                    new_items = self.extractor.extract(soup, seen_hrefs, self.target_url)
-
-                    all_items.extend(new_items)
-
-                    if new_items:
-                        self.progress_signal.emit(f"📦 На странице: {len(new_items)} | Всего: {len(all_items)}")
-                        no_items_streak = 0
-                    else:
-                        no_items_streak += 1
-                        if no_items_streak >= 2:
-                            self.progress_signal.emit("🛑 Конец по условию - две страницы без товаров.")
-                            break
-
-                    current_page += 1
-
-                browser.close()
-
-                if all_items:
-                    with open(self.output_file, "w", encoding="utf-8") as f:
-                        json.dump(all_items, f, ensure_ascii=False, indent=2)
+                if self._save_results(all_items):
                     self.progress_signal.emit(f"🎉 Готово! Товаров: {len(all_items)}")
                     self.finished_signal.emit(self.output_file)
                 else:
-                    self.progress_signal.emit("⚠️ Товары не найдены.")
+                    self.progress_signal.emit("⚠️ Товары не найдены или ошибка записи.")
                     self.finished_signal.emit("")
+            finally:
+                browser.close()
 
+
+
+    def run(self) -> None:
+        """Основной метод запуска парсера."""
+        try:
+            self.run_citadel()
         except Exception as e:
             self.logging_signal.emit(f"❌ Критическая ошибка: {e}")
             self.finished_signal.emit("")
