@@ -6,11 +6,14 @@ from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
+from parser_work import CitadelConfig
+
 # Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
 # и приводили к аппаратным сбоям C++ (0xC0000409).
 from src.auth.api_client import login_to_django
 from src.auto_blind_fuzzer import run_security_api_scan
-from src.parser_worker import ParserWorker
+from src.parser_classes import BaseParserWorker
+from src.parser_work import CitadelExtractor, CitadelParser, XLSXSaver
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -138,7 +141,7 @@ def parsing_on_click(obj) -> None:
     """Запуск парсинга выбранного сайта в фоновом потоке."""
     # Считываем данные из текстовых полей переданного UI-объекта
     target_url = obj.target_url_input.text().strip()
-    brand_keyword = obj.key_word_input.text().strip()
+    keyword = obj.key_word_input.text().strip()
 
     # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
     if not target_url:
@@ -157,15 +160,27 @@ def parsing_on_click(obj) -> None:
     if obj.btn_back_parsing:
         obj.btn_back_parsing.setEnabled(False)
 
-    obj.result_display.append(f"⏳ Запуск парсера для сайта:{target_url}, ключ:{brand_keyword}")
+    obj.result_display.append(f"⏳ Запуск парсера для сайта:{target_url}, ключ:{keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
+
+    #================ Конфигурируем парсер под конкретную задачу ========================
+    config = CitadelConfig(
+        "https://citadel2000.ru/",
+        keyword,
+        "citadel2000.xlsx"
+    )
+    extractor = CitadelExtractor(config)
+    saver = XLSXSaver()
+    parser = CitadelParser(
+        config=config,
+        extractor=extractor,
+        saver=saver
+    )
+    #====================================================================================
 
     # Создаем экземпляр фонового потока
     # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
-    obj.parser_thread = ParserWorker(
-        target_url=target_url,
-        brand_keyword=brand_keyword
-    )
+    obj.parser_thread = BaseParserWorker(parser=parser)
 
     # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
     obj.parser_thread.progress_signal.connect(
