@@ -320,7 +320,7 @@ class MainWindow(QWidget):
         parsing_layout.addWidget(QLabel("Целевой URL:"))
         self.target_url_input = QLineEdit()
         # Устанавливаем реальное значение вместо плейсхолдера
-        self.target_url_input.setText("https://citadel2000.ru/")
+        self.target_url_input.setText("https://gardarika-spb.ru/")
         # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
         self.target_url_input.setReadOnly(True)
         self.target_url_input.setFixedHeight(35)

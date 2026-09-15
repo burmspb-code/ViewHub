@@ -164,18 +164,32 @@ def parsing_on_click(obj) -> None:
     logger.info(f"Старт парсера по адресу {target_url}")
 
     #================ Конфигурируем парсер под конкретную задачу ========================
-    config = CitadelConfig(
+    # config = CitadelConfig(
+    #     target_url,
+    #     keyword,
+    #     "citadel.xlsx"
+    # )
+    # extractor = CitadelExtractor(config)
+    # saver = XLSXSaver()
+    # parser = CitadelParser(
+    #     config=config,
+    #     extractor=extractor,
+    #     saver=saver
+    # )
+
+    config = GardarikaConfig(
         target_url,
         keyword,
-        "citadel.xlsx"
+        "gardarika.xlsx"
     )
-    extractor = CitadelExtractor(config)
+    extractor = GardarikaExtractor(config)
     saver = XLSXSaver()
-    parser = CitadelParser(
+    parser = GardarikaParser(
         config=config,
         extractor=extractor,
         saver=saver
     )
+
     #====================================================================================
 
     # Создаем экземпляр фонового потока
