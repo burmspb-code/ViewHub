@@ -6,14 +6,14 @@ from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-from parser_work import CitadelConfig
+from src.parsers_config.citadel_config import CitadelConfig
 
-# Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
-# и приводили к аппаратным сбоям C++ (0xC0000409).
 from src.auth.api_client import login_to_django
-from src.auto_blind_fuzzer import run_security_api_scan
-from src.parser_classes import BaseParserWorker
-from src.parser_work import CitadelExtractor, CitadelParser, XLSXSaver
+from scaners.auto_blind_fuzzer import run_security_api_scan
+from src.parser_worker import ParserWorker
+from src.extractors.citadel_extractor import CitadelExtractor
+from src.parsers.citadel_parser import CitadelParser
+from src.savers import XLSXSaver
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -165,9 +165,9 @@ def parsing_on_click(obj) -> None:
 
     #================ Конфигурируем парсер под конкретную задачу ========================
     config = CitadelConfig(
-        "https://citadel2000.ru/",
+        target_url,
         keyword,
-        "citadel2000.xlsx"
+        "citadel.xlsx"
     )
     extractor = CitadelExtractor(config)
     saver = XLSXSaver()
@@ -180,7 +180,7 @@ def parsing_on_click(obj) -> None:
 
     # Создаем экземпляр фонового потока
     # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
-    obj.parser_thread = BaseParserWorker(parser=parser)
+    obj.parser_thread = ParserWorker(parser=parser)
 
     # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
     obj.parser_thread.progress_signal.connect(
