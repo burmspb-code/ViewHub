@@ -1,10 +1,11 @@
 """Базовый класс для потоков парсинга."""
 
+import threading  # ИСПРАВЛЕНО: Добавлен обязательный импорт
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from parser_classes import BaseParser, BaseSaver
 from exceptions import ExceptionStopParser
+from parser_classes import BaseParser, BaseSaver
 
 
 class ParserWorker(QThread):
@@ -14,12 +15,13 @@ class ParserWorker(QThread):
 
     progress_signal = pyqtSignal(str)  # Статус для GUI
     finished_signal = pyqtSignal(str)  # Сигнал об успешном завершении (передает путь к файлу или статус)
-    logging_signal = pyqtSignal(str)  # Сигнал ошибок/логов
+    logging_signal = pyqtSignal(str)   # Сигнал ошибок/логов
 
     def __init__(self, parser: BaseParser):
         super().__init__()
         self.parser: BaseParser = parser
-        self._is_running: bool = True
+        # Используем потокобезопасный Event вместо обычного bool
+        self._stop_event = threading.Event()
         self.saver: BaseSaver = parser.saver
         self.file_name: str = parser.setup.file_name
 
@@ -28,18 +30,12 @@ class ParserWorker(QThread):
         Точка входа в поток.
         """
         try:
-            # Универсальный вызов подготовки файла:
-            # Работает прозрачно для любого Saver-а (CSV, JSON, XLSX)
-            if self.saver:
-                self.saver.initialize(self.file_name)
-
             total_items_count = 0
 
             # Итерируемся по генератору парсера
             for data_chunk in self.parser.run_parsing():
                 # Проверяем остановку со стороны GUI
-                if not self._is_running:
-                    self.parser.cancel()
+                if self._stop_event.is_set():
                     break
 
                 if not data_chunk:
@@ -49,23 +45,23 @@ class ParserWorker(QThread):
 
                 # Архитектурное улучшение: сохраняем порцию сразу, чтобы не терять данные
                 if self.saver:
-                    self.saver.save(data_chunk, self.file_name)
+                    self.saver.save(data_chunk)
 
                 # Отправляем данные в интерфейс
                 self.progress_signal.emit(
-                    f"📦 Получено в чанке: {len(data_chunk)} | Всего собрано: {total_items_count}"
+                    f"📦 Товаров на странице: {len(data_chunk)} | Всего собрано: {total_items_count}"
                 )
 
             # Формируем финальный статус завершения
-            if self._is_running:
+            if not self._stop_event.is_set():
                 self.progress_signal.emit(f"🎉 Готово! Всего обработано элементов: {total_items_count}")
                 self.finished_signal.emit(self.file_name)
             else:
                 self.finished_signal.emit("Процесс парсинга был остановлен пользователем.")
 
         except ExceptionStopParser as e:
-            self.logging_signal.emit(f"🛑 Процесс остановлен по условию: {e}")
-            self.finished_signal.emit(self.file_name)
+            self.progress_signal.emit(f"🛑 Процесс остановлен: {e}")
+            self.finished_signal.emit("")
 
         except Exception as e:
             error_text = str(e)
@@ -77,5 +73,6 @@ class ParserWorker(QThread):
         """
         Вызывается из главного UI потока для остановки.
         """
-        self._is_running = False
+        self._stop_event.set()
+        # Сигнализируем самому парсеру (иrequests сессии или Playwright-циклу), что нужно прерваться
         self.parser.cancel()

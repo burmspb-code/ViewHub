@@ -29,16 +29,11 @@ class BaseSaver(ABC):
     Позволяет абстрагировать способ вывода данных (CSV, Excel, База данных).
     """
 
-    @abstractmethod
-    def initialize(self, file_name: str) -> None:
-        """
-        Подготавливает целевое хранилище к новому запуску (например, очищает файл).
-        Переопределяется в дочерних классах по мере необходимости.
-        """
-        pass
+    def __init__(self, file_name: str):
+        self.file_name = file_name
 
     @abstractmethod
-    def save(self, data: List[Dict[str, Any]], file_name: str) -> bool:
+    def save(self, data: List[Dict[str, Any]]) -> bool:
         """
         Записывает переданную порцию данных в целевое хранилище.
         """

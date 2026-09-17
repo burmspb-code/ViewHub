@@ -6,13 +6,12 @@ from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-from src.parsers_config.citadel_config import CitadelConfig
-
-from src.auth.api_client import login_to_django
 from scaners.auto_blind_fuzzer import run_security_api_scan
+from src.auth.api_client import login_to_django
+from src.extractors.gardarika_extractor import GardarikaExtractor
 from src.parser_worker import ParserWorker
-from src.extractors.citadel_extractor import CitadelExtractor
-from src.parsers.citadel_parser import CitadelParser
+from src.parsers.gardarika_parser import GardarikaParser
+from src.parsers_config.gardarika_config import GardarikaConfig
 from src.savers import XLSXSaver
 
 logger = logging.getLogger()
@@ -160,7 +159,7 @@ def parsing_on_click(obj) -> None:
     if obj.btn_back_parsing:
         obj.btn_back_parsing.setEnabled(False)
 
-    obj.result_display.append(f"⏳ Запуск парсера для сайта:{target_url}, ключ:{keyword}")
+    obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
 
     #================ Конфигурируем парсер под конкретную задачу ========================
@@ -183,7 +182,7 @@ def parsing_on_click(obj) -> None:
         "gardarika.xlsx"
     )
     extractor = GardarikaExtractor(config)
-    saver = XLSXSaver()
+    saver = XLSXSaver(config.file_name)
     parser = GardarikaParser(
         config=config,
         extractor=extractor,
