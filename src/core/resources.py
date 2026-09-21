@@ -4,6 +4,7 @@
 
 import logging
 from pathlib import Path
+
 from PyQt6.QtGui import QIcon
 
 logger = logging.getLogger()
