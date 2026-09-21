@@ -1,9 +1,10 @@
 import asyncio
-import httpx
 import re
 import uuid
-from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
+import httpx
+from bs4 import BeautifulSoup
 
 DEBUG_MODE = True
 
@@ -209,7 +210,8 @@ async def scan_black_box_api(base_url: str):
                         root_len = root_fingerprint.get("len", 0)
                         if root_len > 0 and path != "/":
                             diff = abs(r_len - root_len) / root_len
-                            if diff < 0.02: return None
+                            if diff < 0.02:
+                                return None
 
                     return (path, status)
                 except httpx.HTTPError:

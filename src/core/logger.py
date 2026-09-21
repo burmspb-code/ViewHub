@@ -1,9 +1,8 @@
 import logging
-from pathlib import Path
 from logging import Logger
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
-
 
 # Путь к файлу с логами
 log_dir = Path.cwd() / "logs"
