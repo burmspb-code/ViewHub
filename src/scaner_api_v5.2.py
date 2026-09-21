@@ -41,7 +41,8 @@ async def scan_black_box_api(base_url: str):
 
         # --- ЭТАП 1: УМНЫЙ СБОР ЗАЦЕПОК (Spidering) ---
         try:
-            if DEBUG_MODE: print(f"[📡] Подключение к цели: {base_url}")
+            if DEBUG_MODE:
+                print(f"[📡] Подключение к цели: {base_url}")
             response = await client.get(base_url, timeout=5.0)
 
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -86,7 +87,7 @@ async def scan_black_box_api(base_url: str):
         print("[🔄] Анализ ложных срабатываний (Калибровка детекторов ошибок)...")
         # Получаем эталонные слепки ложных страниц для корня и для админки
         root_fingerprint = await get_soft_404_fingerprint(client, base_url, prefix="")
-        admin_fingerprint = await get_soft_404_fingerprint(client, base_url, prefix="/admin")
+        #admin_fingerprint = await get_soft_404_fingerprint(client, base_url, prefix="/admin")
 
         # --- ЭТАП 3: СНАЙПЕРСКАЯ REGEX-МАТРИЦА (Версия 5.2 — e-Commerce & Slug Оптимизация) ---
         generic_actions = [
@@ -118,7 +119,8 @@ async def scan_black_box_api(base_url: str):
         for mod in discovered_modules:
             generated_paths.add(f"/{mod}/")
             for action in generic_actions:
-                if action: generated_paths.add(f"/{mod}/{action}/")
+                if action:
+                    generated_paths.add(f"/{mod}/{action}/")
             for pk in generic_pks:
                 generated_paths.add(f"/{mod}/{pk}/")
 
@@ -131,11 +133,13 @@ async def scan_black_box_api(base_url: str):
 
             # Скрещиваем найденный модуль со стандартными сущностями (Например: /daily/task/, /api/v1/product/)
             for ent in business_entities:
-                if mod == ent: continue
+                if mod == ent:
+                    continue
                 base_2 = f"/{mod}/{ent}"
                 generated_paths.add(f"{base_2}/")
                 for action in generic_actions:
-                    if action: generated_paths.add(f"{base_2}/{action}/")
+                    if action:
+                        generated_paths.add(f"{base_2}/{action}/")
                 for pk in generic_pks:
                     generated_paths.add(f"{base_2}/{pk}/")
                 # Поддержка слагов на втором уровне вложенности (Например: /catalog/product/test/)
@@ -148,13 +152,15 @@ async def scan_black_box_api(base_url: str):
 
         for p1 in target_prefixes:
             for p2 in target_prefixes:
-                if p1 == p2: continue
+                if p1 == p2:
+                    continue
                 # Цепочки уровня 2 (Например: /api/v1/, /users/auth/, /users/api/)
                 generated_paths.add(f"/{p1}/{p2}/")
 
                 # Цепочки уровня 3 (Например: /users/api/v1/, /api/v1/auth/)
                 for p3 in target_prefixes:
-                    if p3 in [p1, p2]: continue
+                    if p3 in [p1, p2]:
+                        continue
                     base_3 = f"/{p1}/{p2}/{p3}"
                     generated_paths.add(f"{base_3}/")
 
@@ -176,11 +182,13 @@ async def scan_black_box_api(base_url: str):
         auth_patterns = re.compile(r'(login|register|auth|password-reset|me|payments)')
         bug_path_check = "/users/api/v1/auth/login/"
         print(
-            f"[🔍 REGEX ПРОВЕРКА] Присутствует ли /users/api/v1/auth/login/ в матрице? -> {bug_path_check in generated_paths}")
+            f"[🔍 REGEX ПРОВЕРКА] Присутствует ли /users/api/v1/auth/login/ в матрице? ->"
+            f" {bug_path_check in generated_paths}")
 
         # --- ЭТАП 4: АКТИВНОЕ ВАЛИДИРОВАННОЕ ЗОНДИРОВАНИЕ С REGEX ФИЛЬТРАЦИЕЙ ---
         async def check_endpoint(path):
-            if not path.startswith("/"): return None
+            if not path.startswith("/"):
+                return None
             full_url = urljoin(base_url, path)
 
             # Regex для отслеживания целевых путей в логах
