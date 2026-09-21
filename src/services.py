@@ -2,13 +2,17 @@
 
 import json
 import logging
+from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-# Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
-# и приводили к аппаратным сбоям C++ (0xC0000409).
+from scaners.auto_blind_fuzzer import run_security_api_scan
 from src.auth.api_client import login_to_django
-from src.core.auto_blind_fuzzer import run_security_api_scan
+from src.extractors.gardarika_extractor import GardarikaExtractor
+from src.parser_worker import ParserWorker
+from src.parsers.gardarika_parser import GardarikaParser
+from src.parsers_config.gardarika_config import GardarikaConfig
+from src.savers import XLSXSaver
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -69,7 +73,7 @@ def request_on_click(obj) -> None:
     Returns:
         None
     """
-    # 1. Проверяем, авторизован ли пользователь
+    # Проверяем, авторизован ли пользователь
     base_url = getattr(obj, "base_url", None)
     token = getattr(obj, "auth_token", None)
 
@@ -78,7 +82,7 @@ def request_on_click(obj) -> None:
         obj.result_display.append("Статус: Запрос отклонен. Требуется авторизация.")
         return
 
-    # 2. Достаем полный URL эндпоинта из правильного виджета
+    # Достаем полный URL эндпоинта из правильного виджета
     full_url = obj.api_request_url_input.text().strip()
 
     if not full_url:
@@ -86,7 +90,7 @@ def request_on_click(obj) -> None:
         obj.result_display.append("Статус: Запрос отклонен. Требуется эндпоинт.")
         return
 
-    # 3. Передаем JWT-токен с правильным префиксом Bearer
+    # Передаем JWT-токен с правильным префиксом Bearer
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
@@ -130,3 +134,102 @@ def request_on_click(obj) -> None:
 def scanning_on_click(obj) -> None:
     """Запуск универсального асинхронного экспресс-сканирования."""
     run_security_api_scan(obj)
+
+
+def parsing_on_click(obj) -> None:
+    """Запуск парсинга выбранного сайта в фоновом потоке."""
+    # Считываем данные из текстовых полей переданного UI-объекта
+    target_url = obj.target_url_input.text().strip()
+    keyword = obj.key_word_input.text().strip()
+
+    # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
+    if not target_url:
+        with suppress(Exception):
+            obj.target_url_input.setStyleSheet("border: 1px solid #ef4444;")
+        return
+
+    # Сбрасываем красную рамку, если ссылка введена
+    with suppress(Exception):
+        obj.target_url_input.setStyleSheet("")
+
+    # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(False)
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(False)
+
+    obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
+    logger.info(f"Старт парсера по адресу {target_url}")
+
+    #================ Конфигурируем парсер под конкретную задачу ========================
+    # config = CitadelConfig(
+    #     target_url,
+    #     keyword,
+    #     "citadel.xlsx"
+    # )
+    # extractor = CitadelExtractor(config)
+    # saver = XLSXSaver()
+    # parser = CitadelParser(
+    #     config=config,
+    #     extractor=extractor,
+    #     saver=saver
+    # )
+
+    config = GardarikaConfig(
+        target_url,
+        keyword,
+        "gardarika.xlsx"
+    )
+    extractor = GardarikaExtractor(config)
+    saver = XLSXSaver(config.file_name)
+    parser = GardarikaParser(
+        config=config,
+        extractor=extractor,
+        saver=saver
+    )
+
+    #====================================================================================
+
+    # Создаем экземпляр фонового потока
+    # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
+    obj.parser_thread = ParserWorker(parser=parser)
+
+    # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
+    obj.parser_thread.progress_signal.connect(
+        lambda msg: _update_parsing_status(obj, msg)
+    )
+    obj.parser_thread.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
+    obj.parser_thread.logging_signal.connect(lambda msg_err: _update_logging_status(msg_err))
+
+
+    # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    obj.parser_thread.start()
+
+
+# --- Внутренние вспомогательные функции для обработки сигналов потока ---
+def _update_parsing_status(obj, message: str) -> None:
+    """Пишет служебные сообщения о парсинге в информационное окно."""
+    obj.result_display.append(message)
+
+def _update_logging_status(message: str) -> None:
+    """Выводит сообщения в окно логов."""
+    logger.info(message)
+
+
+def _parsing_success_handler(obj, output_file: str="") -> None:
+    """Вызывается автоматически при успешном завершении парсинга."""
+    # Разблокируем интерфейс обратно
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(True)
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(True)
+
+    if output_file:
+        # Показываем сообщение об успешном завершении
+        obj.result_display.append("Успех")
+        obj.result_display.append("📊 Парсинг сайта успешно завершен!")
+        obj.result_display.append(f"Результат парсинга сохранен в файл: {output_file}\n\n")
+
+    logger.info("Завершение работы парсера.")
