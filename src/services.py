@@ -1,12 +1,13 @@
 """Модуль управления бизнес-логикой проекта."""
 
+import asyncio
 import json
 import logging
 from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-from scaners.auto_blind_fuzzer import run_security_api_scan
+from scaners.scaner_api_v6 import scan_black_box_api
 from src.auth.api_client import login_to_django
 from src.extractors.gardarika_extractor import GardarikaExtractor
 from src.parser_worker import ParserWorker
@@ -127,13 +128,17 @@ def request_on_click(obj) -> None:
 
     # Перехватываем исключения исключительно из библиотеки httpx
     except httpx.HTTPError as e:
-        logger.error(f"Ошибка сети httpx при отправке запроса: {e}")
+        logger.exception("Ошибка сети httpx при отправке запроса: %s", e)
         obj.result_display.append(f"Критическая ошибка сети: {e}")
 
 
 def scanning_on_click(obj) -> None:
     """Запуск универсального асинхронного экспресс-сканирования."""
-    run_security_api_scan(obj)
+
+    # Считываем ссылку для сканирования
+    base_url = obj.base_url_input.text().strip()
+
+    asyncio.run(start_fuzzer(base_url))
 
 
 def parsing_on_click(obj) -> None:
@@ -233,3 +238,9 @@ def _parsing_success_handler(obj, output_file: str="") -> None:
         obj.result_display.append(f"Результат парсинга сохранен в файл: {output_file}\n\n")
 
     logger.info("Завершение работы парсера.")
+
+
+async def start_fuzzer(base_url):
+    """Вызов асинхронной функции сканирования."""
+    # Вызываем асинхронную функцию через await
+    await scan_black_box_api(base_url)
