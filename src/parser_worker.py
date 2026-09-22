@@ -74,5 +74,5 @@ class ParserWorker(QThread):
         Вызывается из главного UI потока для остановки.
         """
         self._stop_event.set()
-        # Сигнализируем самому парсеру (иrequests сессии или Playwright-циклу), что нужно прерваться
+        # Сигнализируем самому парсеру (requests сессии или Playwright-циклу), что нужно прерваться
         self.parser.cancel()

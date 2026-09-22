@@ -1,19 +1,19 @@
 """Модуль управления бизнес-логикой проекта."""
 
-import asyncio
 import json
 import logging
 from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-from scaners.scaner_api_v6 import scan_black_box_api
+from scaners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
 from src.extractors.gardarika_extractor import GardarikaExtractor
 from src.parser_worker import ParserWorker
 from src.parsers.gardarika_parser import GardarikaParser
 from src.parsers_config.gardarika_config import GardarikaConfig
 from src.savers import XLSXSaver
+from src.scaner_worker import ScanerWorker
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -138,7 +138,38 @@ def scanning_on_click(obj) -> None:
     # Считываем ссылку для сканирования
     base_url = obj.base_url_input.text().strip()
 
-    asyncio.run(start_fuzzer(base_url))
+    scaner = AsyncScanEndpoint(base_url)
+
+    # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
+    if not base_url:
+        with suppress(Exception):
+            obj.base_url_input.setStyleSheet("border: 1px solid #ef4444;")
+        return
+
+    # Сбрасываем красную рамку, если ссылка введена
+    with suppress(Exception):
+        obj.base_url_input.setStyleSheet("")
+
+    # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(False)
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(False)
+
+    # Создаем экземпляр фонового потока
+    # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
+    obj.scaner_thread = ScanerWorker(scaner=scaner)
+
+    # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
+    obj.scaner_thread.progress_signal.connect(
+        lambda msg: _update_parsing_status(obj, msg)
+    )
+    obj.scaner_thread.finished_signal.connect(lambda obj_scan: _scanning_success_handler(obj, obj_scan))
+    obj.scaner_thread.logging_signal.connect(lambda msg_err: _update_logging_status(msg_err))
+
+    # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    obj.scaner_thread.start()
 
 
 def parsing_on_click(obj) -> None:
@@ -240,7 +271,24 @@ def _parsing_success_handler(obj, output_file: str="") -> None:
     logger.info("Завершение работы парсера.")
 
 
-async def start_fuzzer(base_url):
-    """Вызов асинхронной функции сканирования."""
-    # Вызываем асинхронную функцию через await
-    await scan_black_box_api(base_url)
+def _scanning_success_handler(obj, obj_scan) -> None:
+    """Вызывается автоматически при завершении сканирования."""
+    # Сразу разблокируем интерфейс в любом случае (успех, отмена или ошибка)
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(True)
+
+    if obj.btn_back_parsing:
+        obj.btn_back_parsing.setEnabled(True)
+
+    # Проверяем, получили ли мы валидный результат
+    if obj_scan is None:
+        obj.result_display.append("⚠️ Сканирование не выдало результатов (было прервано или произошло исключение).")
+        logger.warning("Сканер завершил работу без данных (результат равен None).")
+        return
+
+    # Обрабатываем успешный результат (предполагаем, что obj_scan — это список или коллекция)
+    obj.result_display.append("🔹 Успех")
+    obj.result_display.append(f"🔹 Выявлено эндпоинтов: {len(obj_scan)}")
+    obj.result_display.append("🎉 Сканирование сайта успешно завершено!")
+
+    logger.info(f"Завершение работы сканера. Найдено эндпоинтов: {len(obj_scan)}")

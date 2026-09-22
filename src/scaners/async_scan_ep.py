@@ -1,12 +1,32 @@
 import asyncio
 import re
+import threading
 import uuid
 from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
 
+from scaner_classes import BaseScaner
+
 DEBUG_MODE = True
+
+
+class AsyncScanEndpoint(BaseScaner):
+    """
+    Асинхронный сканер эндпоинтов.
+    """
+
+    def __init__(self, base_url: str):
+        super().__init__(base_url)
+        self.base_url = base_url
+
+    def run_scanning(self, stop_event: threading.Event) -> None:
+        """
+        Основной метод логики сканирования.
+        Обязан регулярно проверять stop_event.is_set() для прерывания работы.
+        """
+        pass
 
 
 async def get_soft_404_fingerprint(client, base_url, prefix=""):
