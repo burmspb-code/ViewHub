@@ -15,8 +15,8 @@ class GardarikaParser(BaseParser):
 
     def _build_url(self) -> str:
         """Строит URL для поискового запроса."""
-        base_url = self.setup.target.rstrip("/") + "/"
-        params = {"q": self.setup.keyword}
+        base_url = self.config.target.rstrip("/") + "/"
+        params = {"q": self.config.keyword}
 
         # Создаем поисковый хвост вида: 'search/?q=замок+apecs'
         # Сайт поддерживает кодировку 'cp1251'

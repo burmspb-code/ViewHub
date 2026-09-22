@@ -15,8 +15,8 @@ class CitadelParser(BaseParser):
     def _build_url(self, page: int = 1) -> str:
         """Строит URL для указанной страницы."""
 
-        base_url = self.setup.target.rstrip("/") + "/"
-        url = f"{base_url}catalog/?q={self.setup.keyword}"
+        base_url = self.config.target.rstrip("/") + "/"
+        url = f"{base_url}catalog/?q={self.config.keyword}"
         if page > 1:
             url += f"&PAGEN_2={page}"
         return url

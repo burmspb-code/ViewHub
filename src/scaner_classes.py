@@ -4,7 +4,6 @@
 сохранения результатов и работы в фоновом потоке PyQt6.
 """
 
-import threading
 from abc import ABC, abstractmethod
 
 
@@ -16,9 +15,9 @@ class BaseScaner(ABC):
         self.base_url = base_url
 
     @abstractmethod
-    def run_scanning(self, stop_event: threading.Event) -> None:
+    def run_scanning(self, worker) -> list:
         """
         Основной метод логики сканирования.
-        Обязан регулярно проверять stop_event.is_set() для прерывания работы.
+        Обязан регулярно проверять worker.is_stopped() для прерывания работы.
         """
         pass

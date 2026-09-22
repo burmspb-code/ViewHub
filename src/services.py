@@ -5,6 +5,7 @@ import logging
 from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
+from PyQt6.QtCore import QThread
 
 from scaners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
@@ -15,8 +16,7 @@ from src.parsers_config.gardarika_config import GardarikaConfig
 from src.savers import XLSXSaver
 from src.scaner_worker import ScanerWorker
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # ======================= Логика обработки пользовательских запросов ============================
 
@@ -112,7 +112,7 @@ def request_on_click(obj) -> None:
         with httpx.Client(trust_env=False) as client:
             response = client.get(full_url, headers=headers, params=params, timeout=10.0)
 
-        # 4. Проверяем HTTP статус-код (200 OK)
+        # Проверяем HTTP статус-код (200 OK)
         if response.status_code == 200:
             tasks_data = response.json()  # Безопасно парсим полученный JSON от Django
             logger.info("Данные успешно получены через HTTPX!")
@@ -137,10 +137,10 @@ def scanning_on_click(obj) -> None:
 
     # Считываем ссылку для сканирования
     base_url = obj.base_url_input.text().strip()
-
+    # Устанавливаем нужный сканер
     scaner = AsyncScanEndpoint(base_url)
 
-    # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
+    # Если менеджер забыл ввести ссылку, подсвечиваем поле
     if not base_url:
         with suppress(Exception):
             obj.base_url_input.setStyleSheet("border: 1px solid #ef4444;")
@@ -151,24 +151,44 @@ def scanning_on_click(obj) -> None:
         obj.base_url_input.setStyleSheet("")
 
     # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    if obj.btn_send_scanning:
+        obj.btn_send_scanning.setEnabled(False)
+
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(False)
 
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(False)
+    # Создаем чистый системный поток
+    obj.scaner_thread = QThread()
 
-    # Создаем экземпляр фонового потока
-    # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
-    obj.scaner_thread = ScanerWorker(scaner=scaner)
+    # Создаем рабочий объект
+    obj.scaner_worker = ScanerWorker(scaner=scaner)
 
-    # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
-    obj.scaner_thread.progress_signal.connect(
+    # Перемещаем объект в фоновый поток
+    obj.scaner_worker.moveToThread(obj.scaner_thread)
+
+    # Связываем запуск потока с выполнением метода run()
+    obj.scaner_thread.started.connect(obj.scaner_worker.run)
+
+    # Цепочка очистки после остановки потока:
+    # Закрываем поток после завершения работы воркера
+    obj.scaner_worker.finished_signal.connect(obj.scaner_thread.quit)
+
+    # Удаляем тред из памяти
+    obj.scaner_thread.finished.connect(obj.scaner_thread.deleteLater)
+
+    # Так же удаляем воркер из памяти
+    obj.scaner_thread.finished.connect(obj.scaner_worker.deleteLater)
+
+    # Подключаем сигналы воркера
+    obj.scaner_worker.progress_signal.connect(
         lambda msg: _update_parsing_status(obj, msg)
     )
-    obj.scaner_thread.finished_signal.connect(lambda obj_scan: _scanning_success_handler(obj, obj_scan))
-    obj.scaner_thread.logging_signal.connect(lambda msg_err: _update_logging_status(msg_err))
+    obj.scaner_worker.finished_signal.connect(lambda obj_scan: _scanning_success_handler(obj, obj_scan))
 
-    # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    obj.result_display.append(f"⏳ Запуск сканера для сайта: {base_url}")
+    logger.info(f"Старт сканера по адресу {base_url}")
+
+    # Запускаем поток
     obj.scaner_thread.start()
 
 
@@ -178,7 +198,7 @@ def parsing_on_click(obj) -> None:
     target_url = obj.target_url_input.text().strip()
     keyword = obj.key_word_input.text().strip()
 
-    # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
+    # Если менеджер забыл ввести ссылку, подсвечиваем поле
     if not target_url:
         with suppress(Exception):
             obj.target_url_input.setStyleSheet("border: 1px solid #ef4444;")
@@ -189,11 +209,11 @@ def parsing_on_click(obj) -> None:
         obj.target_url_input.setStyleSheet("")
 
     # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    if obj.btn_send_scanning:
+        obj.btn_send_scanning.setEnabled(False)
+
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(False)
-
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(False)
 
     obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
@@ -227,19 +247,35 @@ def parsing_on_click(obj) -> None:
 
     #====================================================================================
 
-    # Создаем экземпляр фонового потока
-    # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
-    obj.parser_thread = ParserWorker(parser=parser)
+    # Создаем чистый системный поток
+    obj.parser_thread = QThread()
+
+    # Создаем рабочий объект
+    obj.parser_worker = ParserWorker(parser=parser)
+
+    # Перемещаем объект в фоновый поток
+    obj.parser_worker.moveToThread(obj.parser_thread)
+
+    # Связываем запуск потока с выполнением метода run()
+    obj.parser_thread.started.connect(obj.parser_worker.run)
+
+    # АВТОМАТИЧЕСКАЯ ЦЕПОЧКА ОЧИСТКИ при завершении потока:
+    # Когда воркер закончит работу -> даем команду потоку закрыться (выход из event loop)
+    obj.parser_worker.finished_signal.connect(obj.parser_thread.quit)
+
+    # Когда сам поток полностью остановится -> безопасно удаляем тред из памяти
+    obj.parser_thread.finished.connect(obj.parser_thread.deleteLater)
+
+    # Когда поток остановится -> также автоматически удаляем воркер из памяти
+    obj.parser_thread.finished.connect(obj.parser_worker.deleteLater)
 
     # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
-    obj.parser_thread.progress_signal.connect(
+    obj.parser_worker.progress_signal.connect(
         lambda msg: _update_parsing_status(obj, msg)
     )
-    obj.parser_thread.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
-    obj.parser_thread.logging_signal.connect(lambda msg_err: _update_logging_status(msg_err))
+    obj.parser_worker.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
 
-
-    # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    # Запускаем поток
     obj.parser_thread.start()
 
 
@@ -248,19 +284,15 @@ def _update_parsing_status(obj, message: str) -> None:
     """Пишет служебные сообщения о парсинге в информационное окно."""
     obj.result_display.append(message)
 
-def _update_logging_status(message: str) -> None:
-    """Выводит сообщения в окно логов."""
-    logger.info(message)
-
 
 def _parsing_success_handler(obj, output_file: str="") -> None:
     """Вызывается автоматически при успешном завершении парсинга."""
     # Разблокируем интерфейс обратно
+    if obj.btn_send_scanning:
+        obj.btn_send_scanning.setEnabled(True)
+
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(True)
-
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(True)
 
     if output_file:
         # Показываем сообщение об успешном завершении
@@ -274,11 +306,11 @@ def _parsing_success_handler(obj, output_file: str="") -> None:
 def _scanning_success_handler(obj, obj_scan) -> None:
     """Вызывается автоматически при завершении сканирования."""
     # Сразу разблокируем интерфейс в любом случае (успех, отмена или ошибка)
+    if obj.btn_send_scanning:
+        obj.btn_send_scanning.setEnabled(True)
+
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(True)
-
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(True)
 
     # Проверяем, получили ли мы валидный результат
     if obj_scan is None:

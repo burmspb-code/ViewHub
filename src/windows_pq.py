@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.logger import QTextEditHandler
+from src.core.logger import register_gui_handler
 from src.core.resources import load_app_icon
 from src.core.styles import (
     BACK_BUTTON_STYLE,
@@ -34,9 +34,7 @@ from src.core.styles import (
 )
 from src.services import auth_on_click, parsing_on_click, request_on_click, scanning_on_click
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
+logger = logging.getLogger(__name__)
 
 class MainWindow(QWidget):
     """
@@ -114,12 +112,14 @@ class MainWindow(QWidget):
         self.zone3 = None
         self.log_display = None
 
-        self.init_ui()
-        self.connect_signals()
-
         # Задаем токен и url для дальнейшей работы
         self.auth_token = None
         self.base_url = None
+
+        # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
+        self.init_ui()
+        self.connect_signals()
+
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
@@ -425,16 +425,13 @@ class MainWindow(QWidget):
 
         main_splitter.addWidget(top_splitter)
         main_splitter.addWidget(self.zone3)
-        main_splitter.setStretchFactor(0, 3)
-        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setStretchFactor(0, 65)
+        main_splitter.setStretchFactor(1, 35)
 
         layout.addWidget(main_splitter)
 
         # Подключаем логгер для окна логов
-        qt_handler = QTextEditHandler(self.log_display)
-        qt_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s]: %(message)s", datefmt="%H:%M:%S"))
-        qt_handler.setLevel(logging.DEBUG)
-        logging.getLogger().addHandler(qt_handler)
+        register_gui_handler(self.log_display, level=logging.INFO)
 
     def on_save_settings_click(self):
         """

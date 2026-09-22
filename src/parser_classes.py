@@ -59,7 +59,7 @@ class BaseParser(ABC):
     """
 
     def __init__(self, config: BaseConfig, extractor: BaseExtractor, saver: BaseSaver):
-        self.setup: BaseConfig = config
+        self.config: BaseConfig = config
         self.extractor: BaseExtractor = extractor
         self.saver: BaseSaver = saver
         self._is_running: bool = True

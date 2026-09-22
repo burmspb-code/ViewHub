@@ -12,7 +12,7 @@ class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переиме
     """Extractor для сайта Гардарики."""
 
     def __init__(self, config: BaseConfig) -> None:
-        self.setup = config
+        self.config = config
 
     def extract_data(self, raw_content: Any) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
@@ -24,13 +24,13 @@ class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переиме
             soup = BeautifulSoup(str(raw_content), "lxml")
 
         # Извлекаем первую попавшуюся таблицу с товарами
-        table_products = soup.select_one(f"{self.setup.config['table_selector']}")
+        table_products = soup.select_one(f"{self.config.config['table_selector']}")
 
         if not table_products:
             raise ExceptionStopParser("Таблица с товарами не найдена")
 
         # Шаг 1. Извлекаем все карточки товара
-        cards = table_products.select(f"tbody {self.setup.config.get('card_selector', 'tr')}")
+        cards = table_products.select(f"tbody {self.config.config.get('card_selector', 'tr')}")
 
         if not cards:
             raise ExceptionStopParser("Карточки отсутствуют в таблице")

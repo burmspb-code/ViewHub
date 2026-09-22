@@ -1,5 +1,11 @@
 """Главный модуль запуска приложения."""
+import logging
+# СРАЗУ настраиваем базовый уровень для root логгера
+from src.core.logger import setup_logger
+setup_logger(name="", level=logging.INFO)
 
+# Только ТЕПЕРЬ импортируем всё остальное.
+# Все модули гарантированно увидят уже готовый root-логгер с нужным уровнем!
 import sys
 import traceback
 

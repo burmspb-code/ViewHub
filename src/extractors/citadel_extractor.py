@@ -13,7 +13,7 @@ class CitadelExtractor(BaseExtractor):
     """Extractor для сайта Цитадель."""
 
     def __init__(self, config: BaseConfig) -> None:
-        self.setup = config
+        self.config = config
         # Храним посещенные ссылки на уровне экземпляра экстрактора,
         # чтобы избегать дубликатов между разными страницами одного процесса
         self.seen_hrefs: set[str] = set()
@@ -29,10 +29,10 @@ class CitadelExtractor(BaseExtractor):
         soup = BeautifulSoup(raw_content, "lxml")
 
         # Базовый URL для сборки полных ссылок
-        base_url = self.setup.target
+        base_url = self.config.target
 
         # Получаем селектор карточки из конфига, если нет - ищем div
-        card_selector = self.setup.config.get("card_selector", "div")
+        card_selector = self.config.config.get("card_selector", "div")
         cards = soup.select(card_selector)
 
         # Если селектор карточки слишком общий, ищем ссылки напрямую
@@ -68,7 +68,7 @@ class CitadelExtractor(BaseExtractor):
 
             # Извлекаем цену
             price = "Цена скрыта"
-            price_keywords = self.setup.config.get("price_keywords", ["price", "cost"])
+            price_keywords = self.config.config.get("price_keywords", ["price", "cost"])
 
             def price_class_filter(x, pk=tuple(price_keywords)):
                 return x and any(k in str(x).lower() for k in pk)
@@ -82,7 +82,7 @@ class CitadelExtractor(BaseExtractor):
             # Извлекаем артикул
             code = ""
             default_code_keywords = ("code", "art", "articul", "sku")
-            code_keywords = self.setup.config.get("code", default_code_keywords)
+            code_keywords = self.config.config.get("code", default_code_keywords)
 
             # Лямбда с аргументом по умолчанию (защита от B023)
             code_el = card.find(class_=lambda x, ck=tuple(code_keywords): x and any(c in str(x).lower() for c in ck))
