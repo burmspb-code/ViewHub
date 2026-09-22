@@ -1,4 +1,4 @@
-"""Модуль управления бизнес-логикой проекта."""
+"""Сервисный слой проекта."""
 
 import json
 import logging
@@ -18,7 +18,6 @@ from src.scaner_worker import ScanerWorker
 
 logger = logging.getLogger(__name__)
 
-# ======================= Логика обработки пользовательских запросов ============================
 
 def auth_on_click(obj) -> None:
     """
@@ -192,6 +191,29 @@ def scanning_on_click(obj) -> None:
     obj.scaner_thread.start()
 
 
+def scanning_cancel_on_click(obj) -> None:  # Исправлено: Nome -> None
+    """Обработчик нажатия на кнопку 'ОТМЕНИТЬ' во время сканирования."""
+    # Проверяем, запущен ли поток сканера в данный момент
+    if hasattr(obj, 'scaner_thread') and obj.scaner_thread.isRunning():
+        logger.info("Запрос на отмену сканирования отправлен пользователем...")
+
+        # Выводим красивый статус пользователю в текстовую панель
+        if hasattr(obj, 'result_display'):
+            obj.result_display.append("🛑 Останавливаем сканирование, пожалуйста, подождите...")
+
+        # Делаем кнопку отмены временно неактивной, чтобы избежать спам-кликов
+        if hasattr(obj, 'btn_cancel_scanning'):
+            obj.btn_cancel_scanning.setEnabled(False)
+
+        # Поднимаем потокобезопасный флаг остановки внутри воркера.
+        # Асинхронный наблюдатель watcher_task внутри сканера поймает этот флаг
+        # за 100 мс и мгновенно прервет сетевые запросы.
+        if hasattr(obj, 'scaner_worker'):
+            obj.scaner_worker.stop()
+    else:
+        logger.warning("Невозможно отменить сканирование: процесс не запущен или уже завершен.")
+
+
 def parsing_on_click(obj) -> None:
     """Запуск парсинга выбранного сайта в фоновом потоке."""
     # Считываем данные из текстовых полей переданного UI-объекта
@@ -279,6 +301,10 @@ def parsing_on_click(obj) -> None:
     obj.parser_thread.start()
 
 
+def parsing_cancel_on_click(obj) -> None:
+    pass
+
+
 # --- Внутренние вспомогательные функции для обработки сигналов потока ---
 def _update_parsing_status(obj, message: str) -> None:
     """Пишет служебные сообщения о парсинге в информационное окно."""
@@ -311,6 +337,10 @@ def _scanning_success_handler(obj, obj_scan) -> None:
 
     if obj.btn_send_parsing:
         obj.btn_send_parsing.setEnabled(True)
+
+    # Возвращаем кнопку отмены в рабочее состояние только ЗДЕСЬ!
+    if obj.btn_cancel_scanning:
+        obj.btn_cancel_scanning.setEnabled(True)
 
     # Проверяем, получили ли мы валидный результат
     if obj_scan is None:

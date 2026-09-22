@@ -30,9 +30,17 @@ from src.core.styles import (
     LOG_DISPLAY_STYLE,
     SIDEBAR_STYLE,
     SUBMIT_BUTTON_STYLE,
+    CANCEL_BUTTON_STYLE,
     TOGGLE_PWD_VISIBILITY_STYLE,
 )
-from src.services import auth_on_click, parsing_on_click, request_on_click, scanning_on_click
+from src.services import (
+    auth_on_click,
+    parsing_on_click,
+    parsing_cancel_on_click,
+    request_on_click,
+    scanning_on_click,
+    scanning_cancel_on_click,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +94,7 @@ class MainWindow(QWidget):
         self.btn_back_scanning = None
         self.page_scanning = None
         self.btn_send_scanning = None
+        self.btn_cancel_scanning = None
 
         # Навигация парсинга
         self.page_parsing = None
@@ -94,6 +103,7 @@ class MainWindow(QWidget):
         self.btn_send_parsing = None
         self.btn_parsing_menu = None
         self.key_word_input = None
+        self.btn_cancel_parsing = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -301,6 +311,12 @@ class MainWindow(QWidget):
         self.btn_send_scanning.setStyleSheet(SUBMIT_BUTTON_STYLE)
         scanning_layout.addWidget(self.btn_send_scanning)
 
+        self.btn_cancel_scanning = QPushButton("ОТМЕНИТЬ")
+        self.btn_cancel_scanning.setMinimumHeight(42)
+        self.btn_cancel_scanning.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_scanning.setStyleSheet(CANCEL_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_cancel_scanning)
+
         scanning_layout.addStretch()
         self.stack.addWidget(self.page_scanning)
 
@@ -340,6 +356,12 @@ class MainWindow(QWidget):
         self.btn_send_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_send_parsing.setStyleSheet(SUBMIT_BUTTON_STYLE)
         parsing_layout.addWidget(self.btn_send_parsing)
+
+        self.btn_cancel_parsing = QPushButton("ОТМЕНИТЬ")
+        self.btn_cancel_parsing.setMinimumHeight(42)
+        self.btn_cancel_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_parsing.setStyleSheet(CANCEL_BUTTON_STYLE)
+        parsing_layout.addWidget(self.btn_cancel_parsing)
 
         parsing_layout.addStretch()
         self.stack.addWidget(self.page_parsing)
@@ -502,11 +524,13 @@ class MainWindow(QWidget):
         self.btn_scanning_menu.clicked.connect(self.show_scanning_page)  # На форму сканирования
         self.btn_back_scanning.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_scanning.clicked.connect(lambda: scanning_on_click(self))  # На сканирование
+        self.btn_cancel_scanning.clicked.connect(lambda: scanning_cancel_on_click(self))  # Отмена сканирования
 
         # Парсинг
         self.btn_parsing_menu.clicked.connect(self.show_parsing_page)  # На форму парсинга
         self.btn_back_parsing.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
+        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self)) # Отмена парсинга
 
         # Настройки
         self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек

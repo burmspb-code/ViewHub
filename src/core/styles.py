@@ -93,8 +93,31 @@ BACK_BUTTON_STYLE = """
 # Стиль компактной кнопки "Показать" пароль
 TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;" # noqa: S105
 
-# Зеленая акцентная кнопка "Войти"
-SUBMIT_BUTTON_STYLE = "background-color: #10b981; color: white;"
+# Зеленая акцентная кнопка "Войти/Начать"
+SUBMIT_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #10b981;
+        color: white;
+        border-radius: 4px;
+        padding: 6px 12px;
+    }
+    QPushButton:hover {
+        background-color: #059669;
+    }
+"""
+
+# Красная акцентная кнопка "Отменить"
+CANCEL_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #ef4444;
+        color: white;
+        border-radius: 4px;
+        padding: 6px 12px;
+    }
+    QPushButton:hover {
+        background-color: #dc2626;
+    }
+"""
 
 # Темный "хакерский" стиль для консоли логов (Зона 3)
 LOG_DISPLAY_STYLE = """

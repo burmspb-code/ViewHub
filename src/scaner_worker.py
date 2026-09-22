@@ -40,10 +40,8 @@ class ScanerWorker(QObject):
             result = self.scaner.run_scanning(worker=self)
 
             # Проверяем, не прервал ли пользователь поток во время долгой работы
-            if self.is_stopped():
-                logger.info("Сканирование прервано пользователем.")
-                # Обязательно отправляем сигнал завершения (передаем None),
-                # чтобы GUI разблокировал интерфейс!
+            if self.is_stopped() or result is None:
+                logger.info("Сканирование успешно прервано пользователем.")
                 self.finished_signal.emit(None)
                 return
 

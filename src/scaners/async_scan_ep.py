@@ -25,15 +25,39 @@ class AsyncScanEndpoint(BaseScaner):
     def run_scanning(self, worker) -> list:
         """
         Основной метод логики сканирования.
-        Запускает асинхронный контекст и передает объект worker.
+        Запускает асинхронный контекст и безопасно обрабатывает отмену.
         """
-        return asyncio.run(self._run_async_scan(worker))
+        try:
+            return asyncio.run(self._run_async_scan(worker))
+        except asyncio.CancelledError:
+            # Сюда прилетит ошибка благодаря нашему raise на Шаге 1
+            return []  # 👈 Теперь возвращать пустой список здесь абсолютно безопасно!
+
 
     async def _run_async_scan(self, worker) -> list:
         """
-        Асинхронная обертка для контроля состояния потока внутри asyncio loop.
+        Единственное место, контролирующее отмену.
+        Сам код сканирования остается нетронутым.
         """
-        return await scan_black_box_api(self.base_url, worker)
+        # Запускаем вашу чистую функцию в фоне
+        scan_task = asyncio.create_task(scan_black_box_api(self.base_url, worker))
+
+        # Быстрый фоновый наблюдатель за кнопкой
+        async def cancel_watcher():
+            while not worker.is_stopped():
+                await asyncio.sleep(0.1)
+            scan_task.cancel()  # Убивает всю цепочку асинхронных этапов мгновенно
+
+        watcher_task = asyncio.create_task(cancel_watcher())
+
+        try:
+            return await scan_task
+        except asyncio.CancelledError:
+            logger.info("Сканирование мгновенно остановлено пользователем.")
+            raise  # 👈 Пробрасываем исключение дальше для asyncio loop!
+        finally:
+            if not watcher_task.done():
+                watcher_task.cancel()
 
 
 async def get_soft_404_fingerprint(client, base_url, prefix=""):
