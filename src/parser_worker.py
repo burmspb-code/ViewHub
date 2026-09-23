@@ -48,7 +48,7 @@ class ParserWorker(QObject):
 
                 total_items_count += len(data_chunk)
 
-                # Архитектурное улучшение: сохраняем порцию сразу, чтобы не терять данные
+                # Сохраняем данные чанками
                 if self.saver:
                     self.saver.save(data_chunk)
 
