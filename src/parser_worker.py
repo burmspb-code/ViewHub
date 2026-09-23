@@ -18,6 +18,7 @@ class ParserWorker(QObject):
 
     progress_signal = pyqtSignal(str)  # Статус для GUI
     finished_signal = pyqtSignal(str)  # Сигнал об успешном завершении (передает путь к файлу или статус)
+    stop_signal = pyqtSignal(str)  # Сигнал о принудительной остановке
 
     def __init__(self, parser: BaseParser):
         super().__init__()
@@ -34,14 +35,14 @@ class ParserWorker(QObject):
         """
         Точка входа в поток.
         """
-        try:
-            total_items_count = 0
 
+        total_items_count = 0
+        try:
             # Итерируемся по генератору парсера
             for data_chunk in self.parser.run_parsing():
                 # Проверяем остановку со стороны GUI
                 if self._stop_event.is_set():
-                    break
+                    raise ExceptionStopParser("Процесс отменен пользователем.")
 
                 if not data_chunk:
                     continue
@@ -57,20 +58,22 @@ class ParserWorker(QObject):
                     f"📦 Товаров на странице: {len(data_chunk)} | Всего собрано: {total_items_count}"
                 )
 
+            # Если нет данных выбрасываем исключение
+            if total_items_count == 0:
+                raise ExceptionStopParser("Данные не обнаружены.")
+
             # Формируем финальный статус завершения
             if not self._stop_event.is_set():
-                self.progress_signal.emit(f"🎉 Готово! Всего обработано элементов: {total_items_count}")
+                self.progress_signal.emit(f"Всего обработано элементов: {total_items_count}")
                 self.finished_signal.emit(self.file_name)
-            else:
-                self.finished_signal.emit("Процесс парсинга был остановлен пользователем.")
 
         except ExceptionStopParser as e:
-            self.progress_signal.emit(f"🛑 Процесс остановлен: {e}")
-            self.finished_signal.emit("")
+            logger.info("Парсер сгенерировал исключение остановки: %s", e)
+            self.stop_signal.emit(f"Всего найдено элементов: {total_items_count}")
 
         except Exception as e:
             error_text = str(e)
-            logger.exception("❌ Критическая ошибка: %s",error_text)
+            logger.exception("❌ Критическая ошибка: %s", error_text)
 
             # Безопасное извлечение первой строки (без падения на пустых Exception)
             lines = error_text.splitlines()

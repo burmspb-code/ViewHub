@@ -29,7 +29,7 @@ class CitadelExtractor(BaseExtractor):
         soup = BeautifulSoup(raw_content, "lxml")
 
         # Базовый URL для сборки полных ссылок
-        base_url = self.config.target
+        base_url = self.config.target_url
 
         # Получаем селектор карточки из конфига, если нет - ищем div
         card_selector = self.config.config.get("card_selector", "div")
