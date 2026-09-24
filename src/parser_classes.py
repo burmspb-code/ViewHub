@@ -17,7 +17,7 @@ class BaseConfig:
         self, target_url: str, keyword: str = "", file_name: str = "", config: Dict[str, Any] | None = None
     ) -> None:
 
-        self.target = target_url
+        self.target_url = target_url
         self.keyword = keyword
         self.file_name = file_name
         self.config = config if config is not None else {}
@@ -59,7 +59,7 @@ class BaseParser(ABC):
     """
 
     def __init__(self, config: BaseConfig, extractor: BaseExtractor, saver: BaseSaver):
-        self.setup: BaseConfig = config
+        self.config: BaseConfig = config
         self.extractor: BaseExtractor = extractor
         self.saver: BaseSaver = saver
         self._is_running: bool = True
@@ -67,6 +67,13 @@ class BaseParser(ABC):
     def cancel(self) -> None:
         """Метод для сигнализации парсеру о необходимости прервать работу."""
         self._is_running = False
+
+    # Хук-обработчик отмены парсинга.
+    # Вызывается автоматически внутри метода cancel() перед остановкой основного цикла.
+    # Предназначен для кастомной очистки ресурсов конкретного сайта.
+    # Переопределение метода опционально. При переопределении вызывайте super()._on_cancel().
+    def _on_cancel(self) -> None:
+        pass # noqa: B027
 
     @abstractmethod
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:

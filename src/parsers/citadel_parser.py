@@ -15,11 +15,12 @@ class CitadelParser(BaseParser):
     def _build_url(self, page: int = 1) -> str:
         """Строит URL для указанной страницы."""
 
-        base_url = self.setup.target.rstrip("/") + "/"
-        url = f"{base_url}catalog/?q={self.setup.keyword}"
+        base_url = self.config.target_url.rstrip("/") + "/"
+        url = f"{base_url}catalog/?q={self.config.keyword}"
         if page > 1:
             url += f"&PAGEN_2={page}"
         return url
+
 
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
         """Пошагово возвращает списки словарей с данными (постранично)."""
@@ -37,7 +38,7 @@ class CitadelParser(BaseParser):
             while current_page <= max_pages:
                 # Обязательная проверка флага остановки из интерфейса
                 if not self._is_running:
-                    break
+                    raise ExceptionStopParser("Процесс отменен пользователем.")
 
                 url = self._build_url(current_page)
 
@@ -69,10 +70,7 @@ class CitadelParser(BaseParser):
                 else:
                     no_items_streak += 1
                     if no_items_streak >= 2:
-                        raise ExceptionStopParser("Превышен лимит пустых страниц.")
+                        # Штатное завершение по условию - последние две пустые страницы
+                        break
 
                 current_page += 1
-
-            # Чистим ресурсы
-            context.close()
-            browser.close()

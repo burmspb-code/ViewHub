@@ -1,11 +1,17 @@
 """Главный модуль запуска приложения."""
+import logging
+# СРАЗУ настраиваем базовый уровень для root логгера
+from src.core.logger import setup_logger
+setup_logger(name="", level=logging.INFO)
 
-import sys
-import traceback
+# Только ТЕПЕРЬ импортируем всё остальное.
+# Все модули гарантированно увидят уже готовый root-логгер с нужным уровнем!
+import sys # noqa: E402
+import traceback # noqa: E402
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication # noqa: E402
 
-from src.windows_pq import MainWindow
+from src.windows_pq import MainWindow # noqa: E402
 
 
 def log_uncaught_exceptions(ex_cls, ex, tb):

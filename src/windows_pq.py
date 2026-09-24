@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.logger import QTextEditHandler
+from src.core.logger import register_gui_handler
 from src.core.resources import load_app_icon
 from src.core.styles import (
     BACK_BUTTON_STYLE,
@@ -30,13 +30,19 @@ from src.core.styles import (
     LOG_DISPLAY_STYLE,
     SIDEBAR_STYLE,
     SUBMIT_BUTTON_STYLE,
+    CANCEL_BUTTON_STYLE,
     TOGGLE_PWD_VISIBILITY_STYLE,
 )
-from src.services import auth_on_click, parsing_on_click, request_on_click, scanning_on_click
+from src.services import (
+    auth_on_click,
+    parsing_on_click,
+    parsing_cancel_on_click,
+    request_on_click,
+    scanning_on_click,
+    scanning_cancel_on_click,
+)
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
+logger = logging.getLogger(__name__)
 
 class MainWindow(QWidget):
     """
@@ -88,6 +94,7 @@ class MainWindow(QWidget):
         self.btn_back_scanning = None
         self.page_scanning = None
         self.btn_send_scanning = None
+        self.btn_cancel_scanning = None
 
         # Навигация парсинга
         self.page_parsing = None
@@ -96,6 +103,7 @@ class MainWindow(QWidget):
         self.btn_send_parsing = None
         self.btn_parsing_menu = None
         self.key_word_input = None
+        self.btn_cancel_parsing = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -114,12 +122,14 @@ class MainWindow(QWidget):
         self.zone3 = None
         self.log_display = None
 
-        self.init_ui()
-        self.connect_signals()
-
         # Задаем токен и url для дальнейшей работы
         self.auth_token = None
         self.base_url = None
+
+        # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
+        self.init_ui()
+        self.connect_signals()
+
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
@@ -301,6 +311,12 @@ class MainWindow(QWidget):
         self.btn_send_scanning.setStyleSheet(SUBMIT_BUTTON_STYLE)
         scanning_layout.addWidget(self.btn_send_scanning)
 
+        self.btn_cancel_scanning = QPushButton("ОТМЕНИТЬ")
+        self.btn_cancel_scanning.setMinimumHeight(42)
+        self.btn_cancel_scanning.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_scanning.setStyleSheet(CANCEL_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_cancel_scanning)
+
         scanning_layout.addStretch()
         self.stack.addWidget(self.page_scanning)
 
@@ -319,8 +335,9 @@ class MainWindow(QWidget):
 
         parsing_layout.addWidget(QLabel("Целевой URL:"))
         self.target_url_input = QLineEdit()
-        # Устанавливаем реальное значение вместо плейсхолдера
-        self.target_url_input.setText("https://gardarika-spb.ru/")
+        # self.target_url_input.setPlaceholderText("https://target-url")
+        # Предустанавливаем значение вместо плейсхолдера
+        self.target_url_input.setText("https://citadel2000.ru/")
         # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
         self.target_url_input.setReadOnly(True)
         self.target_url_input.setFixedHeight(35)
@@ -339,6 +356,12 @@ class MainWindow(QWidget):
         self.btn_send_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_send_parsing.setStyleSheet(SUBMIT_BUTTON_STYLE)
         parsing_layout.addWidget(self.btn_send_parsing)
+
+        self.btn_cancel_parsing = QPushButton("ОТМЕНИТЬ")
+        self.btn_cancel_parsing.setMinimumHeight(42)
+        self.btn_cancel_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_parsing.setStyleSheet(CANCEL_BUTTON_STYLE)
+        parsing_layout.addWidget(self.btn_cancel_parsing)
 
         parsing_layout.addStretch()
         self.stack.addWidget(self.page_parsing)
@@ -424,16 +447,13 @@ class MainWindow(QWidget):
 
         main_splitter.addWidget(top_splitter)
         main_splitter.addWidget(self.zone3)
-        main_splitter.setStretchFactor(0, 3)
-        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setStretchFactor(0, 65)
+        main_splitter.setStretchFactor(1, 35)
 
         layout.addWidget(main_splitter)
 
         # Подключаем логгер для окна логов
-        qt_handler = QTextEditHandler(self.log_display)
-        qt_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s]: %(message)s", datefmt="%H:%M:%S"))
-        qt_handler.setLevel(logging.DEBUG)
-        logging.getLogger().addHandler(qt_handler)
+        register_gui_handler(self.log_display, level=logging.INFO)
 
     def on_save_settings_click(self):
         """
@@ -504,11 +524,13 @@ class MainWindow(QWidget):
         self.btn_scanning_menu.clicked.connect(self.show_scanning_page)  # На форму сканирования
         self.btn_back_scanning.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_scanning.clicked.connect(lambda: scanning_on_click(self))  # На сканирование
+        self.btn_cancel_scanning.clicked.connect(lambda: scanning_cancel_on_click(self))  # Отмена сканирования
 
         # Парсинг
         self.btn_parsing_menu.clicked.connect(self.show_parsing_page)  # На форму парсинга
         self.btn_back_parsing.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
+        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self)) # Отмена парсинга
 
         # Настройки
         self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек

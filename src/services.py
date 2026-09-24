@@ -1,23 +1,23 @@
-"""Модуль управления бизнес-логикой проекта."""
+"""Сервисный слой проекта."""
 
 import json
 import logging
 from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
+from PyQt6.QtCore import QThread
 
-from scaners.auto_blind_fuzzer import run_security_api_scan
+from scaners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
-from src.extractors.gardarika_extractor import GardarikaExtractor
+from src.extractors.citadel_extractor import CitadelExtractor
 from src.parser_worker import ParserWorker
-from src.parsers.gardarika_parser import GardarikaParser
-from src.parsers_config.gardarika_config import GardarikaConfig
+from src.parsers.citadel_parser import CitadelParser
+from src.parsers_config.citadel_config import CitadelConfig
 from src.savers import XLSXSaver
+from src.scaner_worker import ScanerWorker
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-# ======================= Логика обработки пользовательских запросов ============================
 
 def auth_on_click(obj) -> None:
     """
@@ -111,7 +111,7 @@ def request_on_click(obj) -> None:
         with httpx.Client(trust_env=False) as client:
             response = client.get(full_url, headers=headers, params=params, timeout=10.0)
 
-        # 4. Проверяем HTTP статус-код (200 OK)
+        # Проверяем HTTP статус-код (200 OK)
         if response.status_code == 200:
             tasks_data = response.json()  # Безопасно парсим полученный JSON от Django
             logger.info("Данные успешно получены через HTTPX!")
@@ -127,13 +127,91 @@ def request_on_click(obj) -> None:
 
     # Перехватываем исключения исключительно из библиотеки httpx
     except httpx.HTTPError as e:
-        logger.error(f"Ошибка сети httpx при отправке запроса: {e}")
+        logger.exception("Ошибка сети httpx при отправке запроса: %s", e)
         obj.result_display.append(f"Критическая ошибка сети: {e}")
 
 
 def scanning_on_click(obj) -> None:
     """Запуск универсального асинхронного экспресс-сканирования."""
-    run_security_api_scan(obj)
+
+    # Считываем ссылку для сканирования
+    base_url = obj.base_url_input.text().strip()
+    # Устанавливаем нужный сканер
+    scaner = AsyncScanEndpoint(base_url)
+
+    # Если менеджер забыл ввести ссылку, подсвечиваем поле
+    if not base_url:
+        with suppress(Exception):
+            obj.base_url_input.setStyleSheet("border: 1px solid #ef4444;")
+        return
+
+    # Сбрасываем красную рамку, если ссылка введена
+    with suppress(Exception):
+        obj.base_url_input.setStyleSheet("")
+
+    # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
+    if obj.btn_send_scanning:
+        obj.btn_send_scanning.setEnabled(False)
+
+    if obj.btn_send_parsing:
+        obj.btn_send_parsing.setEnabled(False)
+
+    # Создаем чистый системный поток
+    obj.scaner_thread = QThread()
+
+    # Создаем рабочий объект
+    obj.scaner_worker = ScanerWorker(scaner=scaner)
+
+    # Перемещаем объект в фоновый поток
+    obj.scaner_worker.moveToThread(obj.scaner_thread)
+
+    # Связываем запуск потока с выполнением метода run()
+    obj.scaner_thread.started.connect(obj.scaner_worker.run)
+
+    # Цепочка очистки после остановки потока:
+    # Закрываем поток после завершения работы воркера
+    obj.scaner_worker.finished_signal.connect(obj.scaner_thread.quit)
+
+    # Удаляем тред из памяти
+    obj.scaner_thread.finished.connect(obj.scaner_thread.deleteLater)
+
+    # Так же удаляем воркер из памяти
+    obj.scaner_thread.finished.connect(obj.scaner_worker.deleteLater)
+
+    # Подключаем сигналы воркера
+    obj.scaner_worker.progress_signal.connect(
+        lambda msg: _update_parsing_status(obj, msg)
+    )
+    obj.scaner_worker.finished_signal.connect(lambda obj_scan: _scanning_success_handler(obj, obj_scan))
+
+    obj.result_display.append(f"⏳ Запуск сканера для сайта: {base_url}")
+    logger.info(f"Старт сканера по адресу {base_url}")
+
+    # Запускаем поток
+    obj.scaner_thread.start()
+
+
+def scanning_cancel_on_click(obj) -> None:  # Исправлено: Nome -> None
+    """Обработчик нажатия на кнопку 'ОТМЕНИТЬ' во время сканирования."""
+    # Проверяем, запущен ли поток сканера в данный момент
+    if hasattr(obj, 'scaner_thread') and obj.scaner_thread.isRunning():
+        logger.info("Запрос на отмену сканирования отправлен пользователем...")
+
+        # Выводим красивый статус пользователю в текстовую панель
+        if hasattr(obj, 'result_display'):
+            obj.result_display.append("🛑 Останавливаем сканирование, пожалуйста, подождите...")
+
+        # Делаем кнопку отмены временно неактивной, чтобы избежать спам-кликов
+        if hasattr(obj, 'btn_cancel_scanning'):
+            obj.btn_cancel_scanning.setEnabled(False)
+
+        # Поднимаем потокобезопасный флаг остановки внутри воркера.
+        # Асинхронный наблюдатель watcher_task внутри сканера поймает этот флаг
+        # за 100 мс и мгновенно прервет сетевые запросы.
+        if hasattr(obj, 'scaner_worker'):
+            obj.scaner_worker.stop()
+    else:
+        logger.warning("Невозможно отменить сканирование: процесс не запущен или уже завершен.")
 
 
 def parsing_on_click(obj) -> None:
@@ -142,7 +220,7 @@ def parsing_on_click(obj) -> None:
     target_url = obj.target_url_input.text().strip()
     keyword = obj.key_word_input.text().strip()
 
-    # Простая валидация: если менеджер забыл ввести ссылку, подсвечиваем поле
+    # Если менеджер забыл ввести ссылку, подсвечиваем поле
     if not target_url:
         with suppress(Exception):
             obj.target_url_input.setStyleSheet("border: 1px solid #ef4444;")
@@ -153,83 +231,154 @@ def parsing_on_click(obj) -> None:
         obj.target_url_input.setStyleSheet("")
 
     # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
-    if obj.btn_send_parsing:
-        obj.btn_send_parsing.setEnabled(False)
+    if hasattr(obj, "btn_send_scanning"):
+        obj.btn_send_scanning.setEnabled(False)
 
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(False)
+    if hasattr(obj, "btn_send_parsing"):
+        obj.btn_send_parsing.setEnabled(False)
 
     obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
 
     #================ Конфигурируем парсер под конкретную задачу ========================
-    # config = CitadelConfig(
-    #     target_url,
-    #     keyword,
-    #     "citadel.xlsx"
-    # )
-    # extractor = CitadelExtractor(config)
-    # saver = XLSXSaver()
-    # parser = CitadelParser(
-    #     config=config,
-    #     extractor=extractor,
-    #     saver=saver
-    # )
-
-    config = GardarikaConfig(
+    config = CitadelConfig(
         target_url,
         keyword,
-        "gardarika.xlsx"
+        "citadel.xlsx"
     )
-    extractor = GardarikaExtractor(config)
+    extractor = CitadelExtractor(config)
     saver = XLSXSaver(config.file_name)
-    parser = GardarikaParser(
+    parser = CitadelParser(
         config=config,
         extractor=extractor,
         saver=saver
     )
 
+    # config = GardarikaConfig(
+    #     target_url,
+    #     keyword,
+    #     "gardarika.xlsx"
+    # )
+    # extractor = GardarikaExtractor(config)
+    # saver = XLSXSaver(config.file_name)
+    # parser = GardarikaParser(
+    #     config=config,
+    #     extractor=extractor,
+    #     saver=saver
+    # )
+
     #====================================================================================
 
-    # Создаем экземпляр фонового потока
-    # Сохраняем его внутри obj, чтобы Python не удалил поток из памяти в процессе работы
-    obj.parser_thread = ParserWorker(parser=parser)
+    # Создаем чистый системный поток
+    obj.parser_thread = QThread()
+
+    # Создаем рабочий объект
+    obj.parser_worker = ParserWorker(parser=parser)
+
+    # Перемещаем объект в фоновый поток
+    obj.parser_worker.moveToThread(obj.parser_thread)
+
+    # Связываем запуск потока с выполнением метода run()
+    obj.parser_thread.started.connect(obj.parser_worker.run)
+
+    # АВТОМАТИЧЕСКАЯ ЦЕПОЧКА ОЧИСТКИ при завершении потока:
+    # Поток должен закрыться как при штатном завершении, так и при отмене!
+    obj.parser_worker.finished_signal.connect(obj.parser_thread.quit)
+    obj.parser_worker.stop_signal.connect(obj.parser_thread.quit)
+
+    # Когда сам поток полностью остановится -> безопасно удаляем тред и воркер из памяти
+    obj.parser_thread.finished.connect(obj.parser_thread.deleteLater)
+    obj.parser_thread.finished.connect(obj.parser_worker.deleteLater)
 
     # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
-    obj.parser_thread.progress_signal.connect(
-        lambda msg: _update_parsing_status(obj, msg)
-    )
-    obj.parser_thread.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
-    obj.parser_thread.logging_signal.connect(lambda msg_err: _update_logging_status(msg_err))
-
-
-    # Запускаем поток (PyQt автоматически вызовет метод run() внутри ParserWorker)
+    obj.parser_worker.progress_signal.connect(lambda msg: _update_parsing_status(obj, msg))
+    obj.parser_worker.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
+    obj.parser_worker.stop_signal.connect(lambda msg: _stop_handler(obj, msg))
+    # Запускаем поток
     obj.parser_thread.start()
+
+
+def parsing_cancel_on_click(obj) -> None:
+    """Обработчик нажатия на кнопку 'ОТМЕНИТЬ' во время парсинга."""
+    # Проверяем, запущен ли поток парсера в данный момент
+    if hasattr(obj, "parser_thread") and obj.parser_thread.isRunning():
+        logger.info("Запрос на отмену сканирования отправлен пользователем...")
+
+        # Выводим красивый статус пользователю в текстовую панель
+        if hasattr(obj, "result_display"):
+            obj.result_display.append("🛑 Останавливаем парсинг, пожалуйста, подождите...")
+
+        # Делаем кнопку отмены временно неактивной, чтобы избежать спам-кликов
+        if hasattr(obj, "btn_cancel_parsing"):
+            obj.btn_cancel_parsing.setEnabled(False)
+
+        # Поднимаем потокобезопасный флаг остановки внутри воркера.
+        if hasattr(obj, 'parser_worker'):
+            obj.parser_worker.stop()
+    else:
+        logger.warning("Невозможно отменить парсинг: процесс не запущен или уже завершен.")
 
 
 # --- Внутренние вспомогательные функции для обработки сигналов потока ---
 def _update_parsing_status(obj, message: str) -> None:
-    """Пишет служебные сообщения о парсинге в информационное окно."""
+    """Пишет рабочие сообщения в информационное окно."""
     obj.result_display.append(message)
 
-def _update_logging_status(message: str) -> None:
-    """Выводит сообщения в окно логов."""
-    logger.info(message)
+def _stop_handler(obj, msg: str) -> None:
+    """Информирует о принудительной остановке процесса пользователем."""
+    obj.result_display.append("🛑 Процесс остановлен!")
+    obj.result_display.append(msg)
+
+    # Разблокируем интерфейс обратно
+    if getattr(obj, "btn_send_scanning", None):
+        obj.btn_send_scanning.setEnabled(True)
+
+    if getattr(obj, "btn_send_parsing", None):
+        obj.btn_send_parsing.setEnabled(True)
+
+    if getattr(obj, "btn_cancel_parsing", None):
+        obj.btn_cancel_parsing.setEnabled(True)
+
+    if getattr(obj, "btn_cancel_scanning", None):
+        obj.btn_cancel_scanning.setEnabled(True)
 
 
 def _parsing_success_handler(obj, output_file: str="") -> None:
     """Вызывается автоматически при успешном завершении парсинга."""
     # Разблокируем интерфейс обратно
-    if obj.btn_send_parsing:
-        obj.btn_send_parsing.setEnabled(True)
+    if getattr(obj, "btn_send_scanning", None):
+        obj.btn_send_scanning.setEnabled(True)
 
-    if obj.btn_back_parsing:
-        obj.btn_back_parsing.setEnabled(True)
+    if getattr(obj, "btn_send_parsing", None):
+        obj.btn_send_parsing.setEnabled(True)
 
     if output_file:
         # Показываем сообщение об успешном завершении
-        obj.result_display.append("Успех")
+        obj.result_display.append("🎉 Успех!")
         obj.result_display.append("📊 Парсинг сайта успешно завершен!")
         obj.result_display.append(f"Результат парсинга сохранен в файл: {output_file}\n\n")
 
     logger.info("Завершение работы парсера.")
+
+
+def _scanning_success_handler(obj, obj_scan) -> None:
+    """Вызывается автоматически при завершении сканирования."""
+    # Сразу разблокируем интерфейс в любом случае (успех, отмена или ошибка)
+    if getattr(obj, "btn_cancel_parsing", None):
+        obj.btn_cancel_parsing.setEnabled(True)
+
+    if getattr(obj, "btn_cancel_scanning", None):
+        obj.btn_cancel_scanning.setEnabled(True)
+
+    # Проверяем, получили ли мы валидный результат
+    if obj_scan is None:
+        obj.result_display.append("⚠️ Сканирование не выдало результатов (было прервано или произошло исключение).")
+        logger.warning("Сканер завершил работу без данных (результат равен None).")
+        return
+
+    # Обрабатываем успешный результат (предполагаем, что obj_scan — это список или коллекция)
+    obj.result_display.append("🔹 Успех")
+    obj.result_display.append(f"🔹 Выявлено эндпоинтов: {len(obj_scan)}")
+    obj.result_display.append("🎉 Сканирование сайта успешно завершено!")
+
+    logger.info(f"Завершение работы сканера. Найдено эндпоинтов: {len(obj_scan)}")
