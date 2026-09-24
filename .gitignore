@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Chrome user profile
+manual_testing/chrome_user_profile
+
