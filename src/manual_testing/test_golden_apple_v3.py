@@ -9,40 +9,40 @@ from playwright.sync_api import sync_playwright
 def extract_detail_fields(html_content: str) -> dict:
     """
     ЭТАП 1: Чистый парсинг детальной страницы товара (PDP).
-    Извлекает Описание, Применение и Страну происхождения строго по вашим сканам.
+    Извлекает Описание, Применение и Страну происхождения.
     """
     detail_soup = BeautifulSoup(html_content, "html.parser")
 
-    # Значения по умолчанию, если бренд не заполнил вкладки на сайте
     description = "Описание отсутствует"
     usage = "Не указано"
     country_of_origin = "Не указана"
 
-    # 1. ПОЛЕ №2: ОПИСАНИЕ ТОВАРA (Ищем нативный маркер itemprop="description")
+    # 1. ПОЛЕ №2: ОПИСАНИЕ ТОВАРA
     desc_tag = detail_soup.find(attrs={"itemprop": "description"})
     if desc_tag:
         description = desc_tag.get_text(separator=" ", strip=True)
 
-    # 2. ПОЛЕ №3: ПРИМЕНЕНИЕ (Ищем уникальный атрибут text="Применение")
+    # 2. ПОЛЕ №3: ПРИМЕНЕНИЕ
     usage_container = detail_soup.find("div", attrs={"text": "Применение"})
     if usage_container:
         usage_tag = usage_container.find("div", class_=lambda x: x and "_ga-pdp-wysiwyg" in x)
         if usage_tag:
-            usage = usage_tag.text.strip()
+            usage = usage_tag.get_text(strip=True)
 
-    # 3. ПОЛЕ №4: СТРАНА ПРОИСХОЖДЕНИЯ (Ищем уникальный атрибут text="Информация и документы")
+    # 3. ПОЛЕ №4: СТРАНА ПРОИСХОЖДЕНИЯ (ИСПРАВЛЕНО: Безотказный поиск по регулярному выражению)
     info_container = detail_soup.find("div", attrs={"text": "Информация и документы"})
     if info_container:
-        paragraphs = info_container.find_all("p")
-        for p_node in paragraphs:
-            p_text = p_node.get_text(separator=" ", strip=True)
-            if "страна происхождения" in p_text.lower():
-                # Очищаем текст от заголовка и кавычек, как на вашем скане
-                country_of_origin = p_text.lower().replace("страна происхождения", "").replace('"', "").strip()
-                country_of_origin = country_of_origin.capitalize()
-                break
+        # Получаем весь сплошной текст контейнера, очищая его от скрытых неразрывных пробелов \xa0
+        info_text = info_container.get_text(separator=" ", strip=True).replace("\xa0", " ")
 
-    # Возвращаем порцию новых характеристик
+        # Регулярное выражение ищет фразу "страна происхождения", пропускает любые звездочки,
+        # пробелы, двоеточия или переносы, и захватывает первое идущее следом слово из букв (название страны)
+        match = re.search(r"страна\s+происхождения[\s\*:]+([А-Яа-яЁёА-Яа-яA-Za-z]+)", info_text, re.IGNORECASE)
+
+        if match:
+            # Извлекаем очищенную страну и делаем первую букву заглавной
+            country_of_origin = match.group(1).strip().capitalize()
+
     return {"description": description, "usage": usage, "country_of_origin": country_of_origin}
 
 
