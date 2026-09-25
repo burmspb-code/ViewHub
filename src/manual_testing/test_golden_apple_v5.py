@@ -1,3 +1,5 @@
+"""Модуль отладочного тестирования для Golden Apple."""
+
 import os
 import re
 import asyncio
@@ -35,7 +37,7 @@ async def count_and_get_products_on_page(catalog_page):
         # Находим контейнеры карточек по вашей вчерашней логике тегов <article>
         cards = soup.find_all("article")
 
-        # Страховочный вариант поиска, если структура теговarticle пуста
+        # Страховочный вариант поиска, если структура тегов article пуста
         if not cards:
             print("[!] Предупреждение: Теги 'article' не найдены. Пробуем поиск по itemprop='sku'...")
             cards = soup.find_all(attrs={"itemprop": "sku"})
