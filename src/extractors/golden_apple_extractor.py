@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-class CitadelExtractor(BaseExtractor):
+class GoldenAppleExtractor(BaseExtractor):
     """Extractor для сайта Цитадель (адаптирован под Золотое Яблоко)."""
 
     def __init__(self, config: BaseConfig) -> None:

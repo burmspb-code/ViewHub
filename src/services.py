@@ -9,10 +9,10 @@ from PyQt6.QtCore import QThread
 
 from scaners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
-from src.extractors.citadel_extractor import CitadelExtractor
 from src.parser_worker import ParserWorker
-from src.parsers.citadel_parser import CitadelParser
-from src.parsers_config.citadel_config import CitadelConfig
+from src.extractors.golden_apple_extractor import GoldenAppleExtractor
+from src.parsers.golden_apple_parser import GoldenAppleParser
+from src.parsers_config.golden_apple_config import GoldenAppleConfig
 from src.savers import XLSXSaver
 from src.scaner_worker import ScanerWorker
 
@@ -241,31 +241,19 @@ def parsing_on_click(obj) -> None:
     logger.info(f"Старт парсера по адресу {target_url}")
 
     #================ Конфигурируем парсер под конкретную задачу ========================
-    config = CitadelConfig(
+
+    config = GoldenAppleConfig(
         target_url,
         keyword,
-        "citadel.xlsx"
+        "golden_apple.xlsx"
     )
-    extractor = CitadelExtractor(config)
+    extractor = GoldenAppleExtractor(config)
     saver = XLSXSaver(config.file_name)
-    parser = CitadelParser(
+    parser = GoldenAppleParser(
         config=config,
         extractor=extractor,
         saver=saver
     )
-
-    # config = GardarikaConfig(
-    #     target_url,
-    #     keyword,
-    #     "gardarika.xlsx"
-    # )
-    # extractor = GardarikaExtractor(config)
-    # saver = XLSXSaver(config.file_name)
-    # parser = GardarikaParser(
-    #     config=config,
-    #     extractor=extractor,
-    #     saver=saver
-    # )
 
     #====================================================================================
 
