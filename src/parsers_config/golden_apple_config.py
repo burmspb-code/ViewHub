@@ -1,7 +1,7 @@
-"""Конфигрурация для парсинга сайта Цитадель."""
+"""Конфигурация для парсинга сайта Золотое Яблоко."""
 
 from typing import Any, Dict
-from parser_classes import BaseConfig
+from parent_base_classes import BaseConfig
 
 
 class GoldenAppleConfig(BaseConfig):
@@ -10,20 +10,29 @@ class GoldenAppleConfig(BaseConfig):
     Управляет базовыми ссылками, категориями и именами файлов для PyQt6-воркера.
     """
 
+    # Описание колонок таблицы: имя → SQL-тип.
+    COLUMNS: Dict[str, str] = {
+        "category": "TEXT",
+        "item_id": "TEXT NOT NULL",
+        "brand": "TEXT",
+        "name": "TEXT",
+        "product_type": "TEXT",
+        "old_price_rub": "REAL",
+        "current_price_rub": "REAL",
+        "discount": "REAL",
+        "in_stock": "INTEGER",
+        "rating": "REAL",
+        "url": "TEXT",
+        "catalog_page_url": "TEXT NOT NULL",
+        "description": "TEXT",
+        "usage": "TEXT",
+        "country_of_origin": "TEXT",
+    }
+    KEY_COLUMN: str = "item_id"
+    PAGE_URL_COLUMN: str = "catalog_page_url"
+
     def __init__(
         self, target_url: str, keyword: str = "", file_name: str = "", config: Dict[str, Any] | None = None
     ) -> None:
-        """
-        Инициализация параметров конфигурации.
-
-        :param target_url: Базовый URL сайта (например, 'https://goldapple.ru')
-        :param keyword: Раздел/slug категории (например, 'parfjumerija/dlja-detej')
-        :param file_name: Название файла для сохранения результата чанками
-        :param config: Словарь дополнительных параметров (пока не используется, передаем пустым)
-        """
-        # Если словарь дополнительных настроек не передан, оставляем его пустым
-        if config is None:
-            config = {}
-
-        # Явно передаем параметры в конструктор родительского класса BaseConfig
+        """Инициализация параметров конфигурации."""
         super().__init__(target_url, keyword, file_name, config)

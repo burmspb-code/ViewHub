@@ -1,4 +1,5 @@
 """Главный модуль запуска приложения."""
+
 import logging
 # СРАЗУ настраиваем базовый уровень для root логгера
 from src.core.logger import setup_logger

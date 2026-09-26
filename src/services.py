@@ -13,7 +13,7 @@ from src.parser_worker import ParserWorker
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.parsers.golden_apple_parser import GoldenAppleParser
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
-from src.savers import XLSXSaver
+from savers.sqlite_saver import SqliteSaver
 from src.scaner_worker import ScanerWorker
 
 logger = logging.getLogger(__name__)
@@ -240,49 +240,44 @@ def parsing_on_click(obj) -> None:
     obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
 
-    #================ Конфигурируем парсер под конкретную задачу ========================
+    # ================ Конфигурируем парсер под конкретную задачу ========================
 
-    config = GoldenAppleConfig(
-        target_url,
-        keyword,
-        "golden_apple.xlsx"
-    )
+    config = GoldenAppleConfig(target_url, keyword, "golden_apple.xlsx")
     extractor = GoldenAppleExtractor(config)
-    saver = XLSXSaver(config.file_name)
-    parser = GoldenAppleParser(
-        config=config,
-        extractor=extractor,
-        saver=saver
-    )
+    saver = SqliteSaver(config, db_dir="data")
+    parser = GoldenAppleParser(config=config, extractor=extractor, saver=saver)
 
-    #====================================================================================
+    # ====================================================================================
 
-    # Создаем чистый системный поток
+    # 1. Сначала создаем чистый системный поток QThread
     obj.parser_thread = QThread()
 
-    # Создаем рабочий объект
+    # 2. Затем создаем рабочий объект (Воркер) и передаем ему парсер
     obj.parser_worker = ParserWorker(parser=parser)
 
-    # Перемещаем объект в фоновый поток
+    # 3. Прикрепляем сигнал к парсеру
+    parser.progress_callback = obj.parser_worker.progress_signal.emit
+
+    # 4. Перемещаем воркер в фоновый поток
     obj.parser_worker.moveToThread(obj.parser_thread)
 
-    # Связываем запуск потока с выполнением метода run()
+    # Связываем запуск потока с выполнением метода run() воркера
     obj.parser_thread.started.connect(obj.parser_worker.run)
 
     # АВТОМАТИЧЕСКАЯ ЦЕПОЧКА ОЧИСТКИ при завершении потока:
-    # Поток должен закрыться как при штатном завершении, так и при отмене!
     obj.parser_worker.finished_signal.connect(obj.parser_thread.quit)
     obj.parser_worker.stop_signal.connect(obj.parser_thread.quit)
 
-    # Когда сам поток полностью остановится -> безопасно удаляем тред и воркер из памяти
+    # Безопасное удаление треда и воркера из памяти операционной системы
     obj.parser_thread.finished.connect(obj.parser_thread.deleteLater)
     obj.parser_thread.finished.connect(obj.parser_worker.deleteLater)
 
-    # Подключаем сигналы воркера к функциям обновления UI (используем lambda для передачи obj)
+    # Подключаем сигналы воркера к функциям обновления UI вашего приложения
     obj.parser_worker.progress_signal.connect(lambda msg: _update_parsing_status(obj, msg))
     obj.parser_worker.finished_signal.connect(lambda path: _parsing_success_handler(obj, path))
     obj.parser_worker.stop_signal.connect(lambda msg: _stop_handler(obj, msg))
-    # Запускаем поток
+
+    # Запускаем фоновый поток выполнения Playwright
     obj.parser_thread.start()
 
 

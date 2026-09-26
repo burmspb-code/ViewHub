@@ -3,6 +3,9 @@ import re
 from typing import Any, List, Dict
 from bs4 import BeautifulSoup
 
+from parent_base_classes import BaseExtractor, BaseConfig
+
+
 logger = logging.getLogger(__name__)
 
 class GoldenAppleExtractor(BaseExtractor):
@@ -73,16 +76,16 @@ class GoldenAppleExtractor(BaseExtractor):
             if not item_id:
                 return None
 
-            # 2. Склейка URL товара
+            # 2. Правильная склейка URL товара (ИСПРАВЛЕНО: железная защита от битых ссылок)
             a_tag = card_soup.find("a", href=True)
             href = a_tag["href"].strip() if a_tag else ""
 
             if href.startswith("http"):
                 product_url = href
             else:
-                # Убираем ведущий слеш из href, если он есть, чтобы не дублировать
-                clean_href = href.lstrip("/")
-                product_url = f"https://goldapple.ru{clean_href}" if clean_href else ""
+                # Отрезаем любые крайние слеши у href и собираем ссылку со строгим разделителем /
+                clean_href = href.strip("/")
+                product_url = f"https://goldapple.ru{clean_href}/" if clean_href else ""
 
             # 3. Извлечение БРЕНДА и НАЗВАНИЯ товара
             brand_tag = card_soup.find(class_=lambda x: x and "product-card-name__brand" in x)
@@ -159,21 +162,21 @@ class GoldenAppleExtractor(BaseExtractor):
             logger.error(f"❌ Ошибка разбора одиночной карточки: {e}")
             return None
 
-    def extract_data(self, product_cards: List[Any]) -> List[Dict[str, Any]]:
+    def extract_data(self, raw_content: List[Any]) -> List[Dict[str, Any]]:
         """
         Пакетный метод. Принимает список всех карточек страницы,
         запускает внутренний цикл и возвращает готовый массив базовых данных.
         """
-        # Динамически вырезаем категорию из целевого URL в конфиге для словаря
-        # (Например, из "https://goldapple.ru/parfjumerija" получим "parfjumerija")
+        # ИСПРАВЛЕНО: Забираем категорию напрямую из self.config.keyword
         category_slug = "Каталог"
-        if hasattr(self.config, 'target_url') and self.config.target_url:
-            category_slug = self.config.target_url.replace("https://goldapple.ru", "").strip("/")
+        if hasattr(self.config, "keyword") and self.config.keyword:
+            category_slug = self.config.keyword.strip("/")
 
         page_batch = []
-        for card in product_cards:
+        # Теперь итерируемся по переименованному аргументу raw_content
+        for card in raw_content:
             base_data = self._parse_single_card(card, category_slug)
             if base_data:
                 page_batch.append(base_data)
-                
+
         return page_batch

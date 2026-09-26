@@ -337,7 +337,7 @@ class MainWindow(QWidget):
         self.target_url_input = QLineEdit()
         # self.target_url_input.setPlaceholderText("https://target-url")
         # Предустанавливаем значение вместо плейсхолдера
-        self.target_url_input.setText("https://citadel2000.ru/")
+        self.target_url_input.setText("https://goldapple.ru/")
         # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
         self.target_url_input.setReadOnly(True)
         self.target_url_input.setFixedHeight(35)

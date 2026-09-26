@@ -6,7 +6,7 @@ import threading  # ИСПРАВЛЕНО: Добавлен обязательн�
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from exceptions import ExceptionStopParser
-from parser_classes import BaseParser, BaseSaver
+from parent_base_classes import BaseParser, BaseSaver
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,6 @@
 """
-Модуль базовых абстрактных классов для создания гибкой системы парсинга.
-Обеспечивает разделение бизнес-логики сетевых запросов, извлечения данных,
-сохранения результатов и работы в фоновом потоке PyQt6.
+Модуль базовых абстрактных классов для создания гибкой системы парсинга,
+сканирования, логирования, сохранения данных.
 """
 
 from abc import ABC, abstractmethod
@@ -9,18 +8,34 @@ from typing import Any, Dict, Generator, List
 
 
 class BaseConfig:
-    """
-    Абстрактный класс конфигурации.
-    """
+    """Абстрактный класс конфигурации."""
+
+    # Описание колонок таблицы: имя → SQL-тип.
+    COLUMNS: Dict[str, str] = {}  # схема таблицы
+    KEY_COLUMN: str = ""          # колонка с уникальным ключом (например, item_id)
+    PAGE_URL_COLUMN: str = ""     # колонка с URL страницы (например, catalog_page_url)
 
     def __init__(
-        self, target_url: str, keyword: str = "", file_name: str = "", config: Dict[str, Any] | None = None
+        self,
+        target_url: str,
+        keyword: str = "",
+        file_name: str = "",
+        config: Dict[str, Any] | None = None,
     ) -> None:
-
         self.target_url = target_url
         self.keyword = keyword
         self.file_name = file_name
         self.config = config if config is not None else {}
+
+        # Проверка: ключ дедупа и URL-колонка обязаны существовать в схеме
+        if self.KEY_COLUMN and self.KEY_COLUMN not in self.COLUMNS:
+            raise ValueError(
+                f"KEY_COLUMN='{self.KEY_COLUMN}' отсутствует в COLUMNS"
+            )
+        if self.PAGE_URL_COLUMN and self.PAGE_URL_COLUMN not in self.COLUMNS:
+            raise ValueError(
+                f"PAGE_URL_COLUMN='{self.PAGE_URL_COLUMN}' отсутствует в COLUMNS"
+            )
 
 
 class BaseSaver(ABC):
@@ -79,5 +94,21 @@ class BaseParser(ABC):
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
         """
         Основной метод-генератор, реализующий логику сбора данных.
+        """
+        pass
+
+
+class BaseScaner(ABC):
+    """
+    Абстрактный класс для управления сканированием.
+    """
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+
+    @abstractmethod
+    def run_scanning(self, worker) -> list:
+        """
+        Основной метод логики сканирования.
+        Обязан регулярно проверять worker.is_stopped() для прерывания работы.
         """
         pass
