@@ -1,5 +1,6 @@
 """Конфигурация для парсинга интернет-магазина Золотое Яблоко."""
 
+from typing import Dict, ClassVar
 from core.base_classes import BaseDBParsingConfig
 
 class GoldenAppleConfig(BaseDBParsingConfig):

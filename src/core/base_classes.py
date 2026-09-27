@@ -70,8 +70,8 @@ class BaseParser(ABC):
     Абстрактный класс для управления сетевой логикой и навигацией по сайту.
     """
 
-    def __init__(self, config: BaseConfig, extractor: BaseExtractor, saver: BaseSaver):
-        self.config: BaseConfig = config
+    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, saver: BaseSaver):
+        self.config: BaseDBParsingConfig = config
         self.extractor: BaseExtractor = extractor
         self.saver: BaseSaver = saver
         self._is_running: bool = True

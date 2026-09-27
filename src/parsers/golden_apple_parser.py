@@ -12,7 +12,7 @@ from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
 
 from core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
-from savers import SQLiteSaver
+from src.savers.sqlite_saver import SQLiteSaver
 from exceptions import ExceptionStopParser
 
 
@@ -67,7 +67,7 @@ class GoldenAppleParser(BaseParser):
             page.locator("h1").first.wait_for(state="attached", timeout=20000)
 
             # Небольшая контролируемая пауза для окончательного монтажа Vue-компонентов
-            self._smart_sleep(2.0)
+            self._smart_sleep(1.0)
 
             return page
 
@@ -95,20 +95,18 @@ class GoldenAppleParser(BaseParser):
 
         try:
             # Загружаем базовый URL
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-
-            # ИСПРАВЛЕНО: Ждем прикрепления тега в DOM (attached) вместо видимости на экране (visible)
+            #page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="load", timeout=30000)
+            # Ждем прикрепления тега в DOM (attached) вместо видимости на экране (visible)
             # Это полностью исключает TimeoutError в скрытом (headless) режиме!
-            page.locator("article").first.wait_for(state="attached", timeout=15000)
+            page.locator("article").first.wait_for(state="attached", timeout=30000)
 
-            # ЭМУЛЯЦИЯ СКРОЛЛА: Плавно прокручиваем страницу вниз на 1500 пикселей,
-            # Вместо резкого прыжка делаем три небольших шага для эмуляции реального человека
-            for offset in range(500, 1501, 500):
-                page.evaluate(f"window.scrollTo(0, {offset});")
-                self._smart_sleep(0.3) # Даем Nuxt 3 время среагировать на скролл
+            # ЭМУЛЯЦИЯ СКРОЛЛА:
+            page.evaluate("window.scrollTo(0, 2500);")
+            self._smart_sleep(0.3) # Даем Nuxt 3 время среагировать на скролл
 
             # Даем умный сон 4 секунды, чтобы сетка полностью стабилизировалась в памяти
-            self._smart_sleep(4.0)
+            self._smart_sleep(3.0)
 
             return page
 
@@ -174,6 +172,10 @@ class GoldenAppleParser(BaseParser):
                 timezone_id="Europe/Moscow",
             )
 
+            # Очищаем куки и разрешения от предыдущего запуска
+            context.clear_cookies()
+            context.clear_permissions()
+
             page = context.new_page()
 
             try:
@@ -200,13 +202,60 @@ class GoldenAppleParser(BaseParser):
                     to_gui(f"🔎 Найдено {len(product_cards)} карточек. Сбор базовых данных...")
                     base_items = self.extractor.extract_data(product_cards)
 
+                    # ----------------- Проверка на остановку процесса по условию ------------------------
+                    # 1. Собираем чистый список ID с текущей страницы парсинга
+                    item_id_list = [item.get("item_id") for item in base_items if item.get("item_id")]
+
+                    # 2. Делаем ОДИН запрос к БД и получаем словарь {id: page_number}
+                    db_items_pages = self.saver.check_existing_items_with_pages(item_id_list)
+
+                    # 3. УМНОЕ УСЛОВИЕ ОСТАНОВКИ
+                    # Считаем, сколько товаров с текущей страницы УЖЕ лежат в БД на СТАРЫХ страницах
+                    old_duplicates_count = 0
+
+                    # Флаг закливания пагинации
+                    page_cycling = False
+
+                    for item_id in item_id_list:
+                        string_id = str(item_id)
+
+                        if string_id in db_items_pages:
+                            # Если есть дубликаты, увеличиваем счетчик
+                            old_duplicates_count += 1
+
+                            # Достаем кортеж из словаря базы данных
+                            db_row = db_items_pages[string_id]
+
+                            # db_row — это физический номер страницы из БД (INTEGER).
+                            if db_row < self.current_page:
+                                page_cycling = True # Выставляем флаг зацикливания
+
+                    to_gui(
+                        f"📊 Анализ дубликатов со старых страниц в БД: {old_duplicates_count} из {len(item_id_list)}"
+                    )
+
+                    # Финальный триггер «Победы»: если ВСЯ страница состоит из дубликатов
+                    # со старых страниц, значит мы полностью уперлись в уже пройденный хвост каталога — СТОП.
+                    if old_duplicates_count == len(item_id_list) and page_cycling:
+                        to_gui(f"🏁 Обнаружен пройденный хвост каталога на стр."
+                               f" {self.current_page}. Остановка парсера.")
+                        break
+
+                    # Получаем только те товары, которых нет в БД
+                    new_base_items = [item for item in base_items if str(item.get("item_id")) not in db_items_pages]
+
+                    # Если новых товаров нет завершаем цикл и увеличиваем счетчик страниц
+                    if len(new_base_items) == 0:
+                        self.current_page += 1
+                        continue
+
                     page_batch = []
                     total_in_batch = len(base_items)
                     saved_in_page = 0
 
                     to_gui(f"🚀 Запуск глубокого обхода {total_in_batch} карточек поштучно...")
 
-                    for idx, item in enumerate(base_items, start=1):
+                    for idx, item in enumerate(new_base_items, start=1):
                         if not self._is_running:
                             raise ExceptionStopParser("Процесс отменен пользователем.")
 
@@ -276,7 +325,8 @@ class GoldenAppleParser(BaseParser):
                     # Отдаем пакет воркеру ТОЛЬКО для статистики
                     yield page_batch
 
-                    to_gui(f"💾 Страница №{self.current_page}: записано {saved_in_page} из {total_in_batch} товаров.")
+                    to_gui(f"🟢 Страница №{self.current_page} обработана.\n"
+                           f"💾 Сохранено {saved_in_page} из {total_in_batch} товаров.")
 
                     # Увеличиваем счетчик страницы ТОЛЬКО после полной обработки текущей
                     self.current_page += 1

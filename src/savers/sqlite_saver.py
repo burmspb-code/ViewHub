@@ -25,7 +25,7 @@ class SQLiteSaver:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path: Path = DBParsingConfig.get_db_path(db_path)
-        self.config: Optional[BaseConfig] = None
+        self.config: Optional[BaseDBParsingConfig] = None
         self.table_name: Optional[str] = None
         self.session_id: Optional[str] = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +51,7 @@ class SQLiteSaver:
         # В SQLite считаем СИМВОЛЫ, а не байты
         if len(table_name) > self.MAX_IDENTIFIER_LENGTH:
             # 20 символов хэша гарантируют уникальность
-            hash_suffix = hashlib.md5(table_name.encode("utf-8")).hexdigest()[:20]
+            hash_suffix = hashlib.md5(table_name.encode("utf-8")).hexdigest()[:20] # noqa: S324
 
             # Высчитываем доступное место под базовое имя в символах (63 - 20 - 1 = 42)
             max_base_len = self.MAX_IDENTIFIER_LENGTH - len(hash_suffix) - 1
@@ -131,19 +131,12 @@ class SQLiteSaver:
 
         create_sql = self._build_create_sql(config)
 
-        # Выводим SQL ПЕРЕД выполнением, чтобы видеть именно то, что летит в БД
-        logger.info(f"📜 EXECUTING SQL:\n{create_sql}")
-
         with closing(self._connect()) as conn:
             try:
                 conn.execute(create_sql)
                 conn.commit()
             except Exception as e:
-                logger.error(f"❌ FAILED SQL EXECUTION: {e}")
-                # Для отладки: распечатаем SQL еще раз, если ошибка
-                logger.error("--- FAILED SQL DUMP ---")
-                logger.error(create_sql)
-                logger.error("-----------------------")
+                logger.error(f"❌ Ошибка БД: {e}")
                 raise
 
         logger.info(f"✅ Таблица '{table_name}' успешно создана.")
@@ -229,3 +222,21 @@ class SQLiteSaver:
                     affected += len(items)
 
         return affected
+
+    def check_existing_items_with_pages(self, item_ids: list[str]) -> dict[str, int]:
+        """Возвращает словарь {item_id: page_number} для товаров, которые уже есть в БД."""
+        if not self.table_name or not item_ids:
+            return {}
+
+        placeholders = ", ".join(["?"] * len(item_ids))
+        dedup_col = getattr(self.config, "DEDUP_COLUMN", "item_id")
+
+        # Запрашиваем сразу две колонки: бизнес-ключ и номер страницы
+        sql = f'SELECT "{dedup_col}", "page_number" FROM "{self.table_name}" WHERE "{dedup_col}" IN ({placeholders})'  # noqa: S608
+
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, tuple(item_ids))
+
+            # Собираем результат в словарь: { 'ID_товара': номер_страницы_в_БД }
+            return {str(row[0]): row[1] for row in cursor.fetchall()}

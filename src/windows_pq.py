@@ -344,7 +344,7 @@ class MainWindow(QWidget):
         parsing_layout.addWidget(self.target_url_input)
         parsing_layout.addSpacing(5)
 
-        parsing_layout.addWidget(QLabel("Ключевая фраза:"))
+        parsing_layout.addWidget(QLabel("Ключевая фраза или раздел каталога:"))
         self.key_word_input = QLineEdit()
         self.key_word_input.setPlaceholderText("Key word")
         self.key_word_input.setFixedHeight(35)
