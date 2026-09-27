@@ -3,63 +3,38 @@
 сканирования, логирования, сохранения данных.
 """
 
-import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Tuple, Generator, List, ClassVar, Optional
-
-ColumnSpec = Tuple[str, ...]  # (тип, ограничение1, ограничение2, ...)
+from typing import Any, Dict, Generator, List, ClassVar, Optional
 
 
-class BaseConfig:
-    """Класс конфигурации. Единый формат: голые Python-типы."""
+class BaseDBParsingConfig(ABC):
+    """Абстрактный класс конфигурации базы данных для парсинга."""
 
-    # Бизнес-ключ для дедупликации (UPSERT)
-    DEDUP_COLUMN: str = "item_id"
-
-    # Схема: имя колонки -> Python-тип.
-    # Технические поля (id, created_at, page_number, session_id) сюда НЕ входят:
-    # их генерирует сейвер.
-    COLUMNS: ClassVar[Dict[str, type]] = {
-        "item_id": str,
-        "name": str,
-        "brand": str,
-        "price": float,
-        "url": str,
+    # Системные колонки по умолчанию для SQLite
+    SYSTEM_COLUMNS: ClassVar[Dict[str, str]] = {
+        "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "session_id": "TEXT NOT NULL",  # В SQLite UUID хранят как TEXT
     }
 
-    # Этим колонкам сейвер добавит NOT NULL при создании таблицы
-    NOT_NULL_COLUMNS: Tuple[str, ...] = ("item_id",)
+    # Дефолтные констрейнты таблицы (по умолчанию пустые)
+    TABLE_CONSTRAINTS: ClassVar[tuple] = ()
 
-    # Ограничения уровня таблицы.
-    # Если PRIMARY KEY здесь не указан — сейвер сам добавит технический "id".
-    TABLE_CONSTRAINTS: Tuple[str, ...] = ("UNIQUE (item_id)",)
-
-    def __init__(self, target_url: str, keyword: str, file_name: str) -> None:
+    def __init__(self, target_url: str, keyword: str = "", file_name: str = "") -> None:
         self.target_url = target_url
         self.keyword = keyword
         self.file_name = file_name
 
     @classmethod
-    def get_table_columns(cls) -> Dict[str, type]:
-        """Схема бизнес-колонок: имя -> Python-тип."""
-        return dict(cls.COLUMNS)
+    def get_key_column(cls) -> str:
+        """Возвращает системный PRIMARY KEY таблицы."""
+        return "id"
 
     @classmethod
-    def get_key_column(cls) -> str:
-        """
-        Ключ для UPSERT: берём PRIMARY KEY (col) из TABLE_CONSTRAINTS.
-        Если его нет — используем DEDUP_COLUMN (технический 'id'
-        сейвер создаст сам).
-        """
-        for constraint in cls.TABLE_CONSTRAINTS or ():
-            m = re.search(
-                r'\bPRIMARY\s+KEY\s*$\s*"?(\w+)"?\s*$',
-                str(constraint),
-                re.IGNORECASE,
-            )
-            if m:
-                return m.group(1)
-        return cls.DEDUP_COLUMN
+    @abstractmethod
+    def get_full_schema(cls) -> Dict[str, str]:
+        """Возвращает схему всех колонок таблицы."""
+        pass
 
 
 class BaseSaver(ABC):
@@ -72,10 +47,8 @@ class BaseSaver(ABC):
         self.file_name = file_name
 
     @abstractmethod
-    def save(self, data: List[Dict[str, Any]], page_number: int | None) -> bool:
-        """
-        Записывает переданную порцию данных в целевое хранилище.
-        """
+    def save(self, data: List[Dict[str, Any]]) -> bool:
+        """Записывает данные в файл."""
         pass
 
 

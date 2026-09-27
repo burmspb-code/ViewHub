@@ -11,7 +11,8 @@ from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
 
-from core.base_classes import BaseParser, BaseConfig, BaseSaver, BaseExtractor
+from core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
+from savers import SQLiteSaver
 from exceptions import ExceptionStopParser
 
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 class GoldenAppleParser(BaseParser):
     """Парсинг Сайта Golden Apple."""
 
-    def __init__(self, config: BaseConfig, extractor: BaseExtractor, saver: BaseSaver):
+    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, saver: SQLiteSaver):
         super().__init__(config, extractor, saver)
         # Задаем начальные значения для пагинации
         self.current_page = 1
@@ -75,7 +76,7 @@ class GoldenAppleParser(BaseParser):
             if not self._is_running:
                 raise ExceptionStopParser("Процесс отменен пользователем.") from e
             logger.error(f"    [-] [Детальная Ошибка] Не удалось дождаться загрузки карточки ID {product_id}: {e}")
-            if "page" in locals():
+            if page is not None:
                 page.close()
             return None
 
@@ -101,8 +102,10 @@ class GoldenAppleParser(BaseParser):
             page.locator("article").first.wait_for(state="attached", timeout=15000)
 
             # ЭМУЛЯЦИЯ СКРОЛЛА: Плавно прокручиваем страницу вниз на 1500 пикселей,
-            # чтобы "разбудить" Lazy Load движка Nuxt 3 и заставить его отрендерить карточки
-            page.evaluate("window.scrollTo(0, 1500);")
+            # Вместо резкого прыжка делаем три небольших шага для эмуляции реального человека
+            for offset in range(500, 1501, 500):
+                page.evaluate(f"window.scrollTo(0, {offset});")
+                self._smart_sleep(0.3) # Даем Nuxt 3 время среагировать на скролл
 
             # Даем умный сон 4 секунды, чтобы сетка полностью стабилизировалась в памяти
             self._smart_sleep(4.0)
@@ -231,9 +234,12 @@ class GoldenAppleParser(BaseParser):
                         # --- БЛОК ДЛЯ БИТОГО URL ---
                         if not product_url or product_url in ["https://goldapple.ru", "https://goldapple.ru"]:
                             item.update(deep_data)
+
+                            # Записываем номер страницы прямо в словарь товара перед сохранением
+                            item["page_number"] = self.current_page
+
                             page_batch.append(item)
-                            # ИСПРАВЛЕНО: правильный вызов save
-                            self.saver.save([item], page_number=self.current_page)
+                            self.saver.save([item]) # Передаем чистый список из одного товара
                             saved_in_page += 1
                             continue
                         # --------------------------
@@ -254,8 +260,11 @@ class GoldenAppleParser(BaseParser):
 
                         item.update(deep_data)
 
-                        # --- ПОСТРОЧНАЯ ЗАПИСЬ (ИСПРАВЛЕНО) ---
-                        self.saver.save([item], page_number=self.current_page)
+                        # Записываем номер страницы прямо в словарь товара перед сохранением
+                        item["page_number"] = self.current_page
+
+                        # ПОСТРОЧНАЯ ЗАПИСЬ
+                        self.saver.save([item]) # Передаем чистый список из одного товара
                         saved_in_page += 1
                         # --------------------------------------
 
@@ -278,11 +287,3 @@ class GoldenAppleParser(BaseParser):
             except Exception as e:
                 context.close()
                 raise e
-
-    def cancel(self) -> None:
-        """
-        Вызывается воркером при нажатии кнопки 'Стоп' в GUI.
-        Мгновенно переводит внутренний флаг в False для остановки циклов.
-        """
-        self._is_running = False
-        logger.info("🛑 Сигнал отмены передан в управляющее ядро парсера.")

@@ -1,51 +1,37 @@
-"""Конфигурация для парсинга сайта Золотое Яблоко."""
+"""Конфигурация для парсинга интернет-магазина Золотое Яблоко."""
 
-from typing import Dict, Tuple, ClassVar
+from core.base_classes import BaseDBParsingConfig
 
-from core.base_classes import BaseConfig
-
-
-class GoldenAppleConfig(BaseConfig):
+class GoldenAppleConfig(BaseDBParsingConfig):
     """
     Конфигурация для парсинга интернет-магазина Золотое Яблоко.
-
-    Формат схемы: колонки описываются голыми Python-типами.
-    Маппер в SQLiteSaver превратит:
-        str -> TEXT, float -> REAL, int -> INTEGER, bool -> INTEGER.
-    NOT NULL задаётся через NOT_NULL_COLUMNS, ключи — через TABLE_CONSTRAINTS.
+    Формат схемы: колонки описываются в нативном SQL-формате для SQLite.
     """
 
-    DEDUP_COLUMN = "item_id"
-
-    COLUMNS: ClassVar[Dict[str, type]] = {
-        "item_id": str,
-        "category": str,
-        "brand": str,
-        "name": str,
-        "product_type": str,
-        "old_price_rub": float,
-        "current_price_rub": float,
-        "discount": float,
-        "in_stock": int,          # SQLite хранит булевы значения как 0/1
-        "rating": float,
-        "url": str,
-        "catalog_page_url": str,
-        "description": str,
-        "usage": str,
-        "country_of_origin": str,
+    # Схема бизнес-колонок: имя -> SQL-тип для SQLite
+    BUSINESS_COLUMNS: ClassVar[Dict[str, str]] = {
+        "item_id": "TEXT NOT NULL",  # Идентификатор товара (без UNIQUE, его добавит PRIMARY KEY)
+        "category": "TEXT",
+        "brand": "TEXT",
+        "name": "TEXT NOT NULL",
+        "product_type": "TEXT",
+        "old_price_rub": "REAL",
+        "current_price_rub": "REAL",
+        "discount": "REAL",
+        "in_stock": "INTEGER DEFAULT 0",  # В SQLite булевы значения хранятся как INTEGER (0 или 1)
+        "rating": "REAL",
+        "url": "TEXT",
+        "catalog_page_url": "TEXT",
+        "description": "TEXT",
+        "usage": "TEXT",
+        "country_of_origin": "TEXT",
+        "page_number": "INTEGER",
     }
 
-    NOT_NULL_COLUMNS: Tuple[str, ...] = ("item_id", "name")
+    # Ключ, по которому сейвер будет делать ON CONFLICT (UPSERT)
+    DEDUP_COLUMN: str = "item_id"
 
-    # Первичный ключ задан явно — технический "id" сейвер не добавит
-    TABLE_CONSTRAINTS: Tuple[str, ...] = (
-        "PRIMARY KEY (item_id)",
-    )
-
-    def __init__(
-        self,
-        target_url: str,
-        keyword: str = "",
-        file_name: str = "",
-    ) -> None:
-        super().__init__(target_url, keyword, file_name)
+    @classmethod
+    def get_full_schema(cls) -> Dict[str, str]:
+        """Схема ВСЕХ колонок таблицы: системные + специфичные для сайта."""
+        return {**cls.SYSTEM_COLUMNS, **cls.BUSINESS_COLUMNS}

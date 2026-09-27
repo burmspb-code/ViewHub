@@ -12,12 +12,12 @@ def test_key_and_schema():
     #config = BaseConfig("url", "key", "file")
     config = GoldenAppleConfig("https://goldapple.ru", "духи", "test")
 
-    schema = config.get_table_columns()
+    schema = config.get_full_schema()
     assert isinstance(schema, dict), f"Схема не dict: {type(schema).__name__}"
 
     key_column = config.get_key_column()
     assert isinstance(key_column, str), f"Ключ не строка: {type(key_column).__name__}"
-    assert key_column == "item_id", f"Ожидался item_id, получен: {key_column}"
+    assert key_column == "id", f"Ожидался item_id, получен: {key_column}"
 
     print(f"Технический ключ (PK): {key_column}")
     print(f"Тип PK: {type(key_column).__name__}")

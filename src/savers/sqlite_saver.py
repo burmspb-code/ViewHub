@@ -1,117 +1,131 @@
 import re
-import uuid
 import logging
+import hashlib
+import sqlite3
+import uuid
 from contextlib import closing
+from urllib.parse import urlparse
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, ClassVar
+from typing import Any, Dict, List, Optional
 
-import sqlite3
-
-from core.base_classes import BaseConfig
-from core.db_config import DBConfig
+from core.base_classes import BaseDBParsingConfig
+from core.db_config import DBParsingConfig
 
 
 logger = logging.getLogger(__name__)
 
 
 class SQLiteSaver:
-    MAX_IDENTIFIER_LENGTH = 60
+    """Класс для сохранения данных в SQLite. На вход получаем путь к базе данных для записи."""
 
-    TYPE_MAPPING: ClassVar[Dict[type, List[str]]] = {
-        int: ["INTEGER"],
-        float: ["REAL"],
-        str: ["TEXT"],
-        bool: ["INTEGER"],
-        datetime: ["TEXT"],
-        bytes: ["BLOB"],
-    }
+    # Для SQLite лимит огромный (1 млн), но если мы хотим держать имена аккуратными
+    # или совместимыми с PostgreSQL, оставляем 63 СИМВОЛА.
+    MAX_IDENTIFIER_LENGTH = 63
 
     def __init__(self, db_path: Optional[str] = None) -> None:
-        self.db_path: Path = DBConfig.get_db_path(db_path)
+        self.db_path: Path = DBParsingConfig.get_db_path(db_path)
         self.config: Optional[BaseConfig] = None
         self.table_name: Optional[str] = None
         self.session_id: Optional[str] = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _connect(self):
+        """Устанавливает соединение с SQLite и включает WAL-режим логирования."""
         conn = sqlite3.connect(str(self.db_path))
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn
 
-    def _make_table_name(self, config: BaseConfig) -> str:
-        from urllib.parse import urlparse
-        domain = urlparse(config.target_url).netloc
+    def _make_table_name(self, config: BaseDBParsingConfig) -> str:
+        """Формирует имя таблицы на основе URL и ключевого слова.
+        Ориентировано на ограничение в символах (совместимо с SQLite).
+        """
+        domain = urlparse(config.target_url).netloc  # Получаем домен из URL
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", domain).strip("_")
         keyword = re.sub(r"[^a-zA-Z0-9а-яА-Я]+", "_", config.keyword or "").strip("_")
-        table_name = f"{slug}_{keyword}".strip("_") or "parsed_data"
+
+        # Для SQLite переводим в lower сразу. SQLite регистрозависим для кириллицы,
+        # поэтому приведение к одному регистру спасет от дубликатов таблиц.
+        table_name = f"{slug}_{keyword}".strip("_").lower() or "parsed_data"
+
+        # В SQLite считаем СИМВОЛЫ, а не байты
         if len(table_name) > self.MAX_IDENTIFIER_LENGTH:
-            table_name = table_name[: self.MAX_IDENTIFIER_LENGTH]
-        return table_name.lower()
+            # 20 символов хэша гарантируют уникальность
+            hash_suffix = hashlib.md5(table_name.encode("utf-8")).hexdigest()[:20]
 
-    def _get_dedup_column(self, config: BaseConfig) -> str:
-        dedup = getattr(config, "DEDUP_COLUMN", None)
-        if dedup:
-            return dedup
-        if hasattr(config, "get_dedup_column") and callable(config.get_dedup_column):
-            result = config.get_dedup_column()
-            if result:
-                return result
-        for constraint in getattr(config, "TABLE_CONSTRAINTS", ()) or ():
-            m = re.search(r'UNIQUE\s*$\s*"?(\w+)"?\s*$', str(constraint), re.IGNORECASE)
-            if m:
-                return m.group(1)
-        raise ValueError("Не удалось определить колонку дедупликации.")
+            # Высчитываем доступное место под базовое имя в символах (63 - 20 - 1 = 42)
+            max_base_len = self.MAX_IDENTIFIER_LENGTH - len(hash_suffix) - 1
 
-    def _build_create_sql(self, config: BaseConfig) -> str:
-        not_null_columns = set(getattr(config, "NOT_NULL_COLUMNS", ()) or ())
-        raw_constraints = getattr(config, "TABLE_CONSTRAINTS", ()) or ()
-        constraints = [str(c).strip() for c in raw_constraints if str(c).strip()]
-        has_pk = any("PRIMARY KEY" in c.upper() for c in constraints)
+            # Спокойно режем строку по символам, кириллица здесь не сломается
+            base_name = table_name[:max_base_len].rstrip("_")
+            table_name = f"{base_name}_{hash_suffix}"
 
-        schema = config.get_table_columns()
+        return table_name
+
+    def _build_create_sql(self, config: BaseDBParsingConfig) -> str:
+        """Построение sql запроса создания таблицы."""
+        # Получаем полную схему (в ней уже есть id, created_at, session_id и бизнес-поля)
+        schema = config.get_full_schema()
         if not isinstance(schema, dict):
             raise TypeError(f"Схема должна быть словарем, получено: {type(schema)}")
 
+        # Собираем ограничения таблицы (constraints)
+        raw_constraints = getattr(config, "TABLE_CONSTRAINTS", ()) or ()
+        constraints = [str(c).strip() for c in raw_constraints if str(c).strip()]
+
+        # Получаем имя колонки для дедупликации (например, "item_id")
+        dedup_col = getattr(config, "DEDUP_COLUMN", None)
+
         parts = []
 
-        # 1. Бизнес-колонки
+        # Перебираем ВСЕ колонки из схемы
         for col_name, col_type in schema.items():
-            if col_type not in self.TYPE_MAPPING:
-                raise ValueError(f"Неизвестный тип {col_type} для колонки '{col_name}'")
-            frags = list(self.TYPE_MAPPING[col_type])
-            if col_name in not_null_columns:
-                frags.append("NOT NULL")
-            parts.append(f'"{col_name}" {" ".join(frags)}')
+            actual_type = col_type
 
-        # 2. Технический ключ (если нет своего PK)
-        if not has_pk:
-            parts.append('"id" INTEGER PRIMARY KEY')
+            # Автоматическая защита: если это колонка дедупликации,
+            # и в её типе ещё нет UNIQUE, и она не вынесена в TABLE_CONSTRAINTS — дописываем UNIQUE
+            if col_name == dedup_col and "UNIQUE" not in col_type.upper():
+                # Проверяем, не написан ли UNIQUE для этой колонки в constraints
+                if not any(f"UNIQUE({col_name})" in c.replace(" ", "") for c in constraints):
+                    actual_type = f"{col_type} UNIQUE"
 
-        # 3. Служебные колонки (ТЕПЕРЬ ТУТ: строго до ограничений таблицы!)
-        parts.append('"created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP')
-        parts.append('"page_number" INTEGER')
-        parts.append('"session_id" TEXT NOT NULL')
+            # Оборачиваем имя колонки в безопасные кавычки
+            parts.append(f'"{col_name}" {actual_type}')
 
-        # 4. Ограничения таблицы (ТЕПЕРЬ СТРОГО В КОНЦЕ)
+        # Добавляем "page_number", если его нет в схеме, но он нужен для парсинга
+        if "page_number" not in schema:
+            parts.append('"page_number" INTEGER')
+
+        # Присоединяем ограничения таблицы строго в самый конец
         parts.extend(constraints)
 
+        # Формируем финальный SQL
         cols_def = ",\n    ".join(parts)
-        return f'CREATE TABLE IF NOT EXISTS "{self.table_name}" (\n    {cols_def}\n)'
+        table_name = self._make_table_name(config)
 
+        return f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n    {cols_def}\n)'
 
-    def ensure_table(self, config: BaseConfig) -> str:
+    def ensure_table(self, config: BaseDBParsingConfig) -> str:
+        """Проверяет и обеспечивает существование таблицы в SQLite.
+        Генерирует имя таблицы, валидирует схему и колонку дедупликации,
+        после чего создает таблицу в БД, если она еще не существовала.
+        Args:
+            config (BaseDBParsingConfig): Конфигурация парсера со схемой и настройками.
+        Returns:
+            str: Итоговое имя созданной таблицы.
+        """
         table_name = self._make_table_name(config)
         self.table_name = table_name
 
         # Отладка: что реально идет в SQL
-        schema = config.get_table_columns()
-        logger.debug(f"🔍 DEBUG: Таблица '{table_name}', Тип схемы: {type(schema)}")
+        schema = config.get_full_schema()
+        logger.debug(f"🔍 DEBUG: Таблица '{table_name}', Тип схемы: {type(schema).__name__}")
 
         if not isinstance(schema, dict):
-            raise TypeError(f"Схема должна быть словарем, получено: {type(schema)}")
+            raise TypeError(f"Схема должна быть словарем, получено: {type(schema).__name__}")
 
-        dedup_column = self._get_dedup_column(config)
+        dedup_column = config.DEDUP_COLUMN
+
         if dedup_column not in schema and dedup_column != "id":
             raise ValueError(f"Колонка дедупликации '{dedup_column}' отсутствует в схеме.")
 
@@ -127,63 +141,90 @@ class SQLiteSaver:
             except Exception as e:
                 logger.error(f"❌ FAILED SQL EXECUTION: {e}")
                 # Для отладки: распечатаем SQL еще раз, если ошибка
-                print("--- FAILED SQL DUMP ---")
-                print(create_sql)
-                print("-----------------------")
+                logger.error("--- FAILED SQL DUMP ---")
+                logger.error(create_sql)
+                logger.error("-----------------------")
                 raise
 
         logger.info(f"✅ Таблица '{table_name}' успешно создана.")
         return table_name
 
-    def init_for_config(self, config: BaseConfig) -> str:
+    def init_for_config(self, config: BaseDBParsingConfig) -> str:
+        """Инициализирует сейвер под конкретную конфигурацию.
+        Создает или проверяет таблицу, генерирует уникальный ID сессии
+        и сохраняет настройки для последующей записи данных.
+        Args:
+            config (BaseDBParsingConfig): Конфигурация текущего парсера.
+        Returns:
+            str: Итоговое имя целевой таблицы.
+        """
+        # Импорты внутри метода (или перенесите их в самый верх файла)
         self.config = config
         self.table_name = self.ensure_table(config)
         self.session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         return self.table_name
 
-    def save(self, items: List[Dict[str, Any]], page_number: int = 0) -> int:
+    def save(self, items: List[Dict[str, Any]]) -> int:
+        """Сохраняет пачку товаров в SQLite с обновлением дубликатов (UPSERT).
+
+        Args:
+            items (List[Dict[str, Any]]): Список словарей с данными товаров.
+
+        Returns:
+            int: Количество успешно сохраненных или обновленных записей.
+        """
         if not self.config or not self.table_name or not self.session_id:
             raise RuntimeError("Сейвер не инициализирован.")
 
-        key_column = self.config.get_key_column()
-        schema = self.config.get_table_columns()
-        data_columns = [c for c in schema if c != key_column]
+        from contextlib import closing
+        from datetime import datetime
 
-        cols_to_insert = [key_column, *data_columns, "created_at", "page_number", "session_id"]
+        # 1. Получаем полную схему
+        schema = self.config.get_full_schema()
+        key_column = self.config.get_key_column()  # "id"
+        dedup_column = getattr(self.config, "DEDUP_COLUMN", None)  # "item_id"
+
+        # 2. Формируем список колонок для вставки (исключая автоинкрементный id)
+        # Так как page_number уже в схеме, cols_to_insert соберется автоматически!
+        cols_to_insert = [c for c in schema if c != key_column]
+
         placeholders = ", ".join(["?"] * len(cols_to_insert))
         cols_str = ", ".join(f'"{c}"' for c in cols_to_insert)
 
-        update_cols = [*data_columns, "page_number", "session_id"]
+        # 3. Настраиваем логику обновления при конфликте
+        update_cols = [c for c in cols_to_insert if c not in (dedup_column, "created_at")]
         update_set = ", ".join(f'"{c}" = excluded."{c}"' for c in update_cols)
 
         sql = (
-            f'INSERT INTO "{self.table_name}" ({cols_str}) VALUES ({placeholders}) ' # noqa: S608
-            f'ON CONFLICT("{key_column}") DO UPDATE SET {update_set}'
+            f'INSERT INTO "{self.table_name}" ({cols_str}) VALUES ({placeholders}) '  # noqa: S608
+            f'ON CONFLICT("{dedup_column}") DO UPDATE SET {update_set}'
         )
 
         affected = 0
-        # Предварительно вычисляем неизменяемые для этой пачки значения
         current_time = datetime.now().isoformat()
 
-        # Подготавливаем данные в виде списка кортежей
-        params = [
-            (item.get(key_column), *(item.get(c) for c in data_columns), current_time, page_number, self.session_id)
-            for item in items
-        ]
+        # 4. Подготавливаем параметры (теперь тут супер-простой и быстрый цикл)
+        params = []
+        for item in items:
+            row = []
+            for c in cols_to_insert:
+                if c == "created_at":
+                    row.append(current_time)
+                elif c == "session_id":
+                    row.append(self.session_id)
+                else:
+                    row.append(item.get(c))  # page_number заберется отсюда автоматически!
+            params.append(tuple(row))
 
+        # 5. Пакетная запись в БД
         if params:
             with closing(self._connect()) as conn:
-                # 1. Отключаем автоматический запуск транзакций (опционально для старых версий, но надежно)
                 conn.isolation_level = None
-
-                with conn:  # Контекстный менеджер транзакции (автоматический commit/rollback)
+                with conn:
                     cursor = conn.cursor()
-
-                    # 2. Включаем ускоряющие настройки (PRAGMA)
                     cursor.execute("PRAGMA synchronous = OFF;")
                     cursor.execute("PRAGMA journal_mode = WAL;")
 
-                    # 3. Пакетная вставка
                     cursor.executemany(sql, params)
                     affected += len(items)
 

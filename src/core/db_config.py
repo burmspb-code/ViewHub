@@ -3,13 +3,13 @@ from pathlib import Path
 from typing import Optional
 
 
-class DBConfig:
+class DBParsingConfig:
     """
-    Слой конфигурации базы данных.
+    Слой конфигурации базы данных для парсинга.
     Отвечает за формирование пути к БД и чтение переменных окружения.
     """
 
-    DEFAULT_DB_NAME = "viewhub.db"
+    DEFAULT_DB_NAME = "viewhub_parsing.db"
 
     @classmethod
     def get_db_path(cls, custom_path: Optional[str] = None) -> Path:

@@ -3,15 +3,14 @@ import re
 from typing import Any, List, Dict
 from bs4 import BeautifulSoup
 
-from core.base_classes import BaseExtractor, BaseConfig
-
+from core.base_classes import BaseExtractor, BaseDBParsingConfig
 
 logger = logging.getLogger(__name__)
 
 class GoldenAppleExtractor(BaseExtractor):
     """Extractor для сайта Цитадель (адаптирован под Золотое Яблоко)."""
 
-    def __init__(self, config: BaseConfig) -> None:
+    def __init__(self, config: BaseDBParsingConfig) -> None:
         self.config = config
 
     def extract_deep_data(self, html_content: str) -> Dict[str, str]:
@@ -76,14 +75,13 @@ class GoldenAppleExtractor(BaseExtractor):
             if not item_id:
                 return None
 
-            # 2. Правильная склейка URL товара (ИСПРАВЛЕНО: железная защита от битых ссылок)
+            # 2. Правильная склейка URL товара (железная защита от битых ссылок)
             a_tag = card_soup.find("a", href=True)
             href = a_tag["href"].strip() if a_tag else ""
 
             if href.startswith("http"):
                 product_url = href
             else:
-                # Отрезаем любые крайние слеши у href и собираем ссылку со строгим разделителем /
                 clean_href = href.strip("/")
                 product_url = f"https://goldapple.ru{clean_href}/" if clean_href else ""
 
@@ -99,9 +97,9 @@ class GoldenAppleExtractor(BaseExtractor):
             product_type = type_tag.text.strip() if type_tag else "Нет категории"
 
             # 5. Парсинг ЦЕН И СКИДКИ
-            current_price_rub = 0
-            old_price_rub = 0
-            discount_text = "0%"
+            current_price_rub = 0.0
+            old_price_rub = 0.0
+            calc_discount = 0.0
 
             all_prices = card_soup.find_all(class_=lambda x: x and "_ga-price" in x)
             for p_tag in all_prices:
@@ -109,8 +107,9 @@ class GoldenAppleExtractor(BaseExtractor):
                 if "bnpl" in class_str:
                     continue
 
-                digits = int(re.sub(r"\D", "", p_tag.text)) if re.sub(r"\D", "", p_tag.text) else 0
-                if digits == 0:
+                digits_str = re.sub(r"\D", "", p_tag.text)
+                digits = float(digits_str) if digits_str else 0.0
+                if digits == 0.0:
                     continue
 
                 if "old" in class_str or "discount" in class_str:
@@ -118,32 +117,38 @@ class GoldenAppleExtractor(BaseExtractor):
                 else:
                     current_price_rub = digits
 
-            if old_price_rub == 0:
+            if old_price_rub == 0.0:
                 old_price_rub = current_price_rub
 
-            if old_price_rub > current_price_rub and old_price_rub > 0:
-                calc_discount = round((1 - (current_price_rub / old_price_rub)) * 100)
-                discount_text = f"{calc_discount}%"
+            if old_price_rub > current_price_rub and old_price_rub > 0.0:
+                # Возвращаем чистый float для соответствия REAL в базе
+                calc_discount = float(round((1 - (current_price_rub / old_price_rub)) * 100))
 
-            # 6. Определение НАЛИЧИЯ товара
-            in_stock = True
+            # 6. Определение НАЛИЧИЯ товара (Сохраняем как 1 или 0 для SQLite INTEGER)
+            in_stock = 1
             status_tag = card_soup.find(
                 class_=lambda x: x and ("_ga-pdp-status" in x or "_ga-pdp-product__status" in x)
             )
             if status_tag and ("нет в наличии" in status_tag.text.lower() or "ожидается" in status_tag.text.lower()):
-                in_stock = False
+                in_stock = 0
             elif "нет в наличии" in card_soup.get_text(separator=" ").lower():
-                in_stock = False
+                in_stock = 0
 
-            # 7. Извлечение РЕЙТИНГА товара
-            rating = "0.0"
+            # 7. Извлечение РЕЙТИНГА товара (Приводим к float для типа REAL)
+            rating_val = 0.0
             rating_div = card_soup.find("div", class_=lambda x: x and "product-rating__rating-value" in x)
-            if rating_div:
-                rating = rating_div.text.strip()
+            if rating_div and rating_div.text.strip():
+                try:
+                    rating_val = float(rating_div.text.strip().replace(",", "."))
+                except ValueError:
+                    pass
             else:
                 meta_rating = card_soup.find("meta", attrs={"itemprop": "ratingValue"})
-                if meta_rating and meta_rating.has_attr("content"):
-                    rating = meta_rating["content"].strip()
+                if meta_rating and meta_rating.has_attr("content") and meta_rating["content"].strip():
+                    try:
+                        rating_val = float(meta_rating["content"].strip().replace(",", "."))
+                    except ValueError:
+                        pass
 
             return {
                 "category": category_slug,
@@ -153,9 +158,9 @@ class GoldenAppleExtractor(BaseExtractor):
                 "product_type": product_type,
                 "old_price_rub": old_price_rub,
                 "current_price_rub": current_price_rub,
-                "discount": discount_text,
+                "discount": calc_discount,
                 "in_stock": in_stock,
-                "rating": rating,
+                "rating": rating_val,
                 "url": product_url,
             }
         except Exception as e:
@@ -167,13 +172,11 @@ class GoldenAppleExtractor(BaseExtractor):
         Пакетный метод. Принимает список всех карточек страницы,
         запускает внутренний цикл и возвращает готовый массив базовых данных.
         """
-        # Забираем категорию напрямую из self.config.keyword
         category_slug = "Каталог"
         if hasattr(self.config, "keyword") and self.config.keyword:
             category_slug = self.config.keyword.strip("/")
 
         page_batch = []
-        # Теперь итерируемся по переименованному аргументу raw_content
         for card in raw_content:
             base_data = self._parse_single_card(card, category_slug)
             if base_data:
