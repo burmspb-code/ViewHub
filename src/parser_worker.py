@@ -6,7 +6,7 @@ import threading  # ИСПРАВЛЕНО: Добавлен обязательн�
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from exceptions import ExceptionStopParser
-from parent_base_classes import BaseParser, BaseSaver
+from core.base_classes import BaseParser, BaseSaver
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,9 @@ class ParserWorker(QObject):
 
                 total_items_count += len(data_chunk)
 
-                # Сохраняем данные чанками
-                if self.saver:
-                    self.saver.save(data_chunk)
+                # Переносим сохранения в логику парсера
+                # if self.saver:
+                #     self.saver.save(data_chunk)
 
                 # Отправляем данные в интерфейс
                 self.progress_signal.emit(

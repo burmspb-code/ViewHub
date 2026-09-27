@@ -25,7 +25,9 @@ def parse_category_clean(category_slug, max_pages=300):
             headless=False,  # Обязательно False для прохождения TLS/Nginx проверок
             args=["--disable-blink-features=AutomationControlled"],
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                       " AppleWebKit/537.36 (KHTML, like Gecko)"
+                       " Chrome/124.0.0.0 Safari/537.36",
             locale="ru-RU",
             timezone_id="Europe/Moscow",
         )
@@ -123,7 +125,7 @@ def parse_category_clean(category_slug, max_pages=300):
                         old_price_rub = current_price_rub
 
                     if old_price_rub > current_price_rub and old_price_rub > 0:
-                        calc_discount = int(round((1 - (current_price_rub / old_price_rub)) * 100))
+                        calc_discount = round((1 - (current_price_rub / old_price_rub)) * 100)
                         discount_text = f"{calc_discount}%"
 
                     # 5. Определение наличия товара на складе (Динамическое, по вашему скриншоту)
@@ -160,7 +162,8 @@ def parse_category_clean(category_slug, max_pages=300):
                     save_product_json(product_data, extracted_products, category_slug)
                     page_items_count += 1
 
-                except Exception:
+                except Exception as e:
+                    print(f"Ошибка парсинга: {e}")
                     continue
 
             # Замеряем размер кэша ПОСЛЕ обработки страницы
@@ -169,11 +172,13 @@ def parse_category_clean(category_slug, max_pages=300):
             # ПРЕДОХРАНИТЕЛЬ ОТ ЗАЦИКЛИВАНИЯ ПАГИНАЦИИ:
             # Если карточки на странице были, но НИ ОДНА из них не оказалась новой — категория закончилась!
             if page_items_count > 0 and cache_size_after == cache_size_before:
-                print(f"     [СТОП] Порция {current_page} вернула только дубликаты. Фактический конец каталога.")
+                print(f"[СТОП] Порция {current_page} вернула только дубликаты. Фактический конец каталога.")
                 break
 
             print(
-                f"     [СТАТУС] Порция {current_page} обработана. Добавлено новых: {cache_size_after - cache_size_before}. Общий кэш: {len(extracted_products)} позиций."
+                f"[СТАТУС] Порция {current_page} обработана. Добавлено новых:"
+                f" {cache_size_after - cache_size_before}. Общий кэш:"
+                f" {len(extracted_products)} позиций."
             )
 
             # Сохранение в реальном времени (Защита данных от обрывов на VPS)
@@ -203,9 +208,9 @@ if __name__ == "__main__":
     total_all_products = 0
 
     for sub_slug in perfume_subcategories:
-        print(f"\n=====================================================================")
+        print("\n=====================================================================")
         print(f" НАЧИНАЕМ ГЛУБОКИЙ СБОР ПОДКАТЕГОРИИ: {sub_slug}")
-        print(f"=====================================================================")
+        print("=====================================================================")
 
         try:
             # Запускаем стабильную функцию парсинга HTML-порций
@@ -218,8 +223,8 @@ if __name__ == "__main__":
             continue
 
     global_duration = time.time() - global_start_time
-    print(f"\n=====================================================================")
-    print(f" 🎉 ТЕСТОВЫЙ СБОР КАТЕГОРИИ УСПЕШНО ЗАВЕРШЕН!")
+    print("\n=====================================================================")
+    print(" 🎉 ТЕСТОВЫЙ СБОР КАТЕГОРИИ УСПЕШНО ЗАВЕРШЕН!")
     print(f" ⏱️ Общее время работы скрипта: {global_duration / 60:.2f} мин.")
     print(f" 📦 Всего уникальных карточек сохранено в CSV: {total_all_products}")
-    print(f"=====================================================================")
+    print("=====================================================================")

@@ -65,7 +65,9 @@ def parse_category_clean(category_slug, max_pages=300):
             headless=False,  # Обязательно False для прохождения TLS/Nginx проверок
             args=["--disable-blink-features=AutomationControlled"],
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                       " AppleWebKit/537.36 (KHTML, like Gecko)"
+                       " Chrome/124.0.0.0 Safari/537.36",
             locale="ru-RU",
             timezone_id="Europe/Moscow",
         )
@@ -156,7 +158,7 @@ def parse_category_clean(category_slug, max_pages=300):
                         old_price_rub = current_price_rub
 
                     if old_price_rub > current_price_rub and old_price_rub > 0:
-                        calc_discount = int(round((1 - (current_price_rub / old_price_rub)) * 100))
+                        calc_discount = round((1 - (current_price_rub / old_price_rub)) * 100)
                         discount_text = f"{calc_discount}%"
 
                     # Определение НАЛИЧИЯ по вашему первому скану
@@ -195,7 +197,8 @@ def parse_category_clean(category_slug, max_pages=300):
                         "url": product_url,
                     }
                     current_page_batch.append(product_base)
-                except Exception:
+                except Exception as e:
+                    print(f"[-] Ошибка обработки товара: {e}")
                     continue
 
             # 2. Переходим по ссылкам товаров за глубокими характеристиками
@@ -216,10 +219,11 @@ def parse_category_clean(category_slug, max_pages=300):
                         # Вызываем функцию из ЭТАПа 1
                         deep_fields = extract_detail_fields(detail_page.content())
                         print(
-                            f"        [+] Извлечено глубоко: {prod['brand']} — {prod['name']} | Страна: {deep_fields['country_of_origin']}"
+                            f"[+] Извлечено глубоко: {prod['brand']} — {prod['name']} |"
+                            f" Страна: {deep_fields['country_of_origin']}"
                         )
                     except Exception as e:
-                        print(f"        [!] Ошибка перехода внутрь товара {prod['item_id']}: {e}")
+                        print(f"[!] Ошибка перехода внутрь товара {prod['item_id']}: {e}")
 
                 # Объединяем базовые и глубокие поля
                 prod.update(deep_fields)
@@ -232,11 +236,12 @@ def parse_category_clean(category_slug, max_pages=300):
 
             # ПРЕДОХРАНИТЕЛЬ ОТ ЗАЦИКЛИВАНИЯ ПАГИНАЦИИ
             if page_items_count > 0 and cache_size_after == cache_size_before:
-                print(f"     [СТОП] Порция {current_page} вернула только дубликаты. Категория пройдена.")
+                print(f"[СТОП] Порция {current_page} вернула только дубликаты. Категория пройдена.")
                 break
 
             print(
-                f"     [СТАТУС] Порция {current_page} обработана. Добавлено новых: {cache_size_after - cache_size_before}. Всего: {len(extracted_products)}."
+                f"[СТАТУС] Порция {current_page} обработана. Добавлено новых:"
+                f" {cache_size_after - cache_size_before}. Всего: {len(extracted_products)}."
             )
 
             # Запись файла в реальном времени после каждой страницы (Защита данных)
@@ -268,8 +273,8 @@ if __name__ == "__main__":
     # max_pages=5 — лимит для безопасного тестового прогона
     final_results = parse_category_clean(category_slug=target_slug, max_pages=5)
 
-    print(f"\n=======================================================")
-    print(f"ИТОГОВЫЙ ОТЧЕТ О ВЫПОЛНЕНИИ:")
+    print("\n=======================================================")
+    print("ИТОГОВЫЙ ОТЧЕТ О ВЫПОЛНЕНИИ:")
     print(f"Всего уникальных товаров со всеми характеристиками: {len(final_results)}")
 
     if final_results:
@@ -277,4 +282,4 @@ if __name__ == "__main__":
         print("\nПроверка структуры и новых полей (Превью первых 5 строк):")
         # Выводим в консоль часть полей, включая новые: рейтинг и страну происхождения
         print(df[["brand", "name", "current_price_rub", "rating", "country_of_origin"]].head(5))
-    print(f"=======================================================")
+    print("=======================================================")

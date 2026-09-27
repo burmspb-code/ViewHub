@@ -1,38 +1,51 @@
 """Конфигурация для парсинга сайта Золотое Яблоко."""
 
-from typing import Any, Dict
-from parent_base_classes import BaseConfig
+from typing import Dict, Tuple, ClassVar
+
+from core.base_classes import BaseConfig
 
 
 class GoldenAppleConfig(BaseConfig):
     """
     Конфигурация для парсинга интернет-магазина Золотое Яблоко.
-    Управляет базовыми ссылками, категориями и именами файлов для PyQt6-воркера.
+
+    Формат схемы: колонки описываются голыми Python-типами.
+    Маппер в SQLiteSaver превратит:
+        str -> TEXT, float -> REAL, int -> INTEGER, bool -> INTEGER.
+    NOT NULL задаётся через NOT_NULL_COLUMNS, ключи — через TABLE_CONSTRAINTS.
     """
 
-    # Описание колонок таблицы: имя → SQL-тип.
-    COLUMNS: Dict[str, str] = {
-        "category": "TEXT",
-        "item_id": "TEXT NOT NULL",
-        "brand": "TEXT",
-        "name": "TEXT",
-        "product_type": "TEXT",
-        "old_price_rub": "REAL",
-        "current_price_rub": "REAL",
-        "discount": "REAL",
-        "in_stock": "INTEGER",
-        "rating": "REAL",
-        "url": "TEXT",
-        "catalog_page_url": "TEXT NOT NULL",
-        "description": "TEXT",
-        "usage": "TEXT",
-        "country_of_origin": "TEXT",
+    DEDUP_COLUMN = "item_id"
+
+    COLUMNS: ClassVar[Dict[str, type]] = {
+        "item_id": str,
+        "category": str,
+        "brand": str,
+        "name": str,
+        "product_type": str,
+        "old_price_rub": float,
+        "current_price_rub": float,
+        "discount": float,
+        "in_stock": int,          # SQLite хранит булевы значения как 0/1
+        "rating": float,
+        "url": str,
+        "catalog_page_url": str,
+        "description": str,
+        "usage": str,
+        "country_of_origin": str,
     }
-    KEY_COLUMN: str = "item_id"
-    PAGE_URL_COLUMN: str = "catalog_page_url"
+
+    NOT_NULL_COLUMNS: Tuple[str, ...] = ("item_id", "name")
+
+    # Первичный ключ задан явно — технический "id" сейвер не добавит
+    TABLE_CONSTRAINTS: Tuple[str, ...] = (
+        "PRIMARY KEY (item_id)",
+    )
 
     def __init__(
-        self, target_url: str, keyword: str = "", file_name: str = "", config: Dict[str, Any] | None = None
+        self,
+        target_url: str,
+        keyword: str = "",
+        file_name: str = "",
     ) -> None:
-        """Инициализация параметров конфигурации."""
-        super().__init__(target_url, keyword, file_name, config)
+        super().__init__(target_url, keyword, file_name)

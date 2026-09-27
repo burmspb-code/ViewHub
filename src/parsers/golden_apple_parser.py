@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
 
-from parent_base_classes import BaseParser, BaseConfig, BaseSaver
+from core.base_classes import BaseParser, BaseConfig, BaseSaver, BaseExtractor
 from exceptions import ExceptionStopParser
 
 
@@ -48,10 +48,9 @@ class GoldenAppleParser(BaseParser):
 
     def load_product_detail_page(self, context, product_url: str, product_id: str) -> Any:
         """
-        Модуль 3 (СИНХРОННЫЙ ООП ВАРIАНТ): Открытие фоновой вкладки товара.
+        Модуль 3 (СИНХРОННЫЙ ООП вариант): Открытие фоновой вкладки товара.
         Терпеливо дожидается, пока лоадер сайта (дефис) не сменится реальным текстом товара.
         """
-        logger.info(f"    [*] [Детальная Навигация] Открытие вкладки товара ID: {product_id}...")
 
         page = None
 
@@ -74,7 +73,7 @@ class GoldenAppleParser(BaseParser):
         except Exception as e:
             # Если пользователь нажал Отмена во время ожидания карточки, мгновенно выходим
             if not self._is_running:
-                raise ExceptionStopParser("Процесс отменен пользователем.")
+                raise ExceptionStopParser("Процесс отменен пользователем.") from e
             logger.error(f"    [-] [Детальная Ошибка] Не удалось дождаться загрузки карточки ID {product_id}: {e}")
             if "page" in locals():
                 page.close()
@@ -112,7 +111,7 @@ class GoldenAppleParser(BaseParser):
 
         except Exception as e:
             if not self._is_running:
-                raise ExceptionStopParser("Процесс отменен пользователем.")
+                raise ExceptionStopParser("Процесс отменен пользователем.") from e
             logger.error(f"❌ Не удалось прогрузить страницу каталога №{self.current_page}: {e}")
             raise e
 
@@ -149,12 +148,6 @@ class GoldenAppleParser(BaseParser):
             time.sleep(0.1)
 
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        Постранично возвращает СПИСОК словарей (пакетный генератор).
-        Выводит информацию СТРОГО через callback в инфо-окно виджета.
-        Глобальное логирование ошибок и исключений полностью делегировано уровню выше.
-        """
-        # Шлёт строки СТРОГО в инфо-окно виджета через сигнал PyQt6
         def to_gui(msg: str):
             callback = getattr(self, "progress_callback", None)
             if callback is not None and callable(callback):
@@ -171,7 +164,9 @@ class GoldenAppleParser(BaseParser):
                     "--blink-settings=imagesEnabled=false",
                 ],
                 viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                           " AppleWebKit/537.36 (KHTML, like Gecko)"
+                           " Chrome/124.0.0.0 Safari/537.36",
                 locale="ru-RU",
                 timezone_id="Europe/Moscow",
             )
@@ -187,14 +182,14 @@ class GoldenAppleParser(BaseParser):
                     to_gui(f"🌐 Загрузка страницы каталога №{self.current_page}...")
 
                     catalog_page = self.load_catalog_page(page, url)
-
                     current_url = catalog_page.url
+
+                    # Проверка на конец пагинации
                     if self.current_page > 1 and f"p={self.current_page}" not in current_url:
                         to_gui("🏁 Каталог полностью пройден. Завершение работы.")
                         break
 
                     product_cards = self.count_and_get_products_on_page(catalog_page)
-
                     if not product_cards:
                         to_gui(f"🏁 На странице №{self.current_page} нет товаров. Останов.")
                         break
@@ -204,6 +199,7 @@ class GoldenAppleParser(BaseParser):
 
                     page_batch = []
                     total_in_batch = len(base_items)
+                    saved_in_page = 0
 
                     to_gui(f"🚀 Запуск глубокого обхода {total_in_batch} карточек поштучно...")
 
@@ -212,24 +208,19 @@ class GoldenAppleParser(BaseParser):
                             raise ExceptionStopParser("Процесс отменен пользователем.")
 
                         item["catalog_page_url"] = url
-
-                        product_id = item.get("item_id", "Неизвестen")
+                        product_id = item.get("item_id", "Неизвестен")
                         product_url = item.get("url", "")
 
+                        # Нормализация URL
                         if product_url and "goldapple.ru/" not in product_url:
                             product_url = re.sub(r"goldapple\.ru(?=\d)", "goldapple.ru/", product_url)
                             item["url"] = product_url
 
-                        # Поштучный прогресс летит исключительно в инфо-окно виджета
                         to_gui(
-                            f" 📦 [{idx}/{total_in_batch}] Товар ID: {product_id} ({item.get('brand')} - {item.get('name')})"
+                            f" 📦 [{idx}/{total_in_batch}]"
+                            f" Товар ID: {product_id} ({item.get('brand')} -"
+                            f" {item.get('name')})"
                         )
-
-                        if not product_url or product_url in ["https://goldapple.ru", "https://goldapple.ru"]:
-                            page_batch.append(item)
-                            continue
-
-                        detail_page = self.load_product_detail_page(context, product_url, product_id)
 
                         deep_data = {
                             "description": "Описание отсутствует",
@@ -237,30 +228,48 @@ class GoldenAppleParser(BaseParser):
                             "country_of_origin": "Не указана",
                         }
 
+                        # --- БЛОК ДЛЯ БИТОГО URL ---
+                        if not product_url or product_url in ["https://goldapple.ru", "https://goldapple.ru"]:
+                            item.update(deep_data)
+                            page_batch.append(item)
+                            # ИСПРАВЛЕНО: правильный вызов save
+                            self.saver.save([item], page_number=self.current_page)
+                            saved_in_page += 1
+                            continue
+                        # --------------------------
+
+                        detail_page = self.load_product_detail_page(context, product_url, product_id)
+
                         if detail_page:
                             try:
                                 html_content = detail_page.content()
                                 deep_data = self.extractor.extract_deep_data(html_content)
                                 to_gui(f"    └─ ✅ Характеристики собраны! Страна: {deep_data['country_of_origin']}")
                             except Exception as e:
-                                # Если отмена прилетела во время сбора карточки, прокидываем её вверх
                                 if not self._is_running:
-                                    raise ExceptionStopParser("Процесс отменен пользователем.")
-                                # Обычную ошибку сбора карточки гасим локально, чтобы не уронить парсинг всей страницы,
-                                # но в логгер ничего не пишем — класс уровня выше перехватит общий статус
-                                pass
+                                    raise ExceptionStopParser("Процесс отменен пользователем.") from e
+                                # Ошибку гасим, данные останутся дефолтными
                             finally:
                                 detail_page.close()
 
                         item.update(deep_data)
+
+                        # --- ПОСТРОЧНАЯ ЗАПИСЬ (ИСПРАВЛЕНО) ---
+                        self.saver.save([item], page_number=self.current_page)
+                        saved_in_page += 1
+                        # --------------------------------------
+
                         page_batch.append(item)
 
                         if idx < total_in_batch:
-                            self._smart_sleep(random.uniform(1.5, 3.0))
+                            self._smart_sleep(random.uniform(1.5, 3.0)) # noqa: S311
 
+                    # Отдаем пакет воркеру ТОЛЬКО для статистики
                     yield page_batch
 
-                    to_gui(f"💾 Страница №{self.current_page} успешно сохранена.\n")
+                    to_gui(f"💾 Страница №{self.current_page}: записано {saved_in_page} из {total_in_batch} товаров.")
+
+                    # Увеличиваем счетчик страницы ТОЛЬКО после полной обработки текущей
                     self.current_page += 1
 
             except ExceptionStopParser as e:
@@ -268,7 +277,6 @@ class GoldenAppleParser(BaseParser):
                 raise e
             except Exception as e:
                 context.close()
-                # Передаем исключение "сырым" дальше вверх в воркер — там оно уйдёт в спец-окно логирования
                 raise e
 
     def cancel(self) -> None:

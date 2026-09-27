@@ -73,7 +73,7 @@ def extract_deep_product_data(html_content: str) -> dict:
     if desc_container:
         description = desc_container.get_text(separator=" ", strip=True)
         # Очищаем от лишних крайних кавычек, если они прилетели из верстки
-        description = description.strip('"\'')
+        description = description.strip("\"'")
         print("        [+] [Парсинг PDP] Успешно извлечено поле: Описание товара.")
 
     # 2. ПОЛЕ №3: ПРИМЕНЕНИЕ (Ищем по уникальному атрибуту text="Применение")
@@ -82,7 +82,7 @@ def extract_deep_product_data(html_content: str) -> dict:
         # Находим внутренний блок с контентом по частичному совпадению класса
         usage_tag = usage_container.find("div", class_=lambda x: x and "_ga-pdp-wysiwyg" in x)
         if usage_tag:
-            usage = usage_tag.get_text(separator=" ", strip=True).strip('"\'')
+            usage = usage_tag.get_text(separator=" ", strip=True).strip("\"'")
             print("        [+] [Парсинг PDP] Успешно извлечено поле: Применение.")
 
     # 3. ПОЛЕ №4: СТРАНА ПРОИСХОЖДЕНИЯ (Ищем по уникальному атрибуту text="Информация и документы")
@@ -98,17 +98,15 @@ def extract_deep_product_data(html_content: str) -> dict:
                     # Вырезаем маркер "страна происхождения" и полностью очищаем результат
                     country_raw = p_text.lower().replace("страна происхождения", "")
                     # Убираем кавычки, двоеточия, звездочки и пробелы из DOM-дерева
-                    country_clean = country_raw.replace("*", "").replace(":", "").replace('"', "").replace("'", "").strip()
+                    country_clean = (
+                        country_raw.replace("*", "").replace(":", "").replace('"', "").replace("'", "").strip()
+                    )
                     if country_clean:
                         country_of_origin = country_clean.capitalize()
-                        print(f"        [+] [Парсинг PDP] Успешно извлечено поле: Страна происхождения -> {country_of_origin}")
+                        print(f"[+] [Парсинг PDP] Успешно извлечено поле: Страна происхождения -> {country_of_origin}")
                         break
 
-    return {
-        "description": description,
-        "usage": usage,
-        "country_of_origin": country_of_origin
-    }
+    return {"description": description, "usage": usage, "country_of_origin": country_of_origin}
 
 
 def extract_base_product_data(card_soup, category_slug):
@@ -176,11 +174,9 @@ def extract_base_product_data(card_soup, category_slug):
             old_price_rub = current_price_rub
 
         if old_price_rub > current_price_rub and old_price_rub > 0:
-            calc_discount = int(round((1 - (current_price_rub / old_price_rub)) * 100))
+            calc_discount = round((1 - (current_price_rub / old_price_rub)) * 100)
             discount_text = f"{calc_discount}%"
-        print(
-            f"    [+] Цена актуальная: {current_price_rub} руб. | Старая: {old_price_rub} руб. | Скидка: {discount_text}"
-        )
+        print(f"[+] Цена актуальная: {current_price_rub} руб. | Старая: {old_price_rub} руб. | Скидка: {discount_text}")
 
         # 6. Определение НАЛИЧИЯ товара
         in_stock = True
@@ -240,7 +236,7 @@ async def run_deep_pdp_conveyor(context, base_products_batch):
         print(f"\n[*] [Конвейер] Обработка товара [{idx}/{total_items}] | ID: {product_id}")
 
         if not product_url or product_url == "https://goldapple.ru":
-            print(f"    [-] [Конвейер] Пропуск товара ID {product_id}: отсутствует валидный URL.")
+            print(f"[-] [Конвейер] Пропуск товара ID {product_id}: отсутствует валидный URL.")
             completed_products.append(prod)
             continue
 
@@ -258,26 +254,27 @@ async def run_deep_pdp_conveyor(context, base_products_batch):
                 deep_data = extract_deep_product_data(html_content)
 
             except Exception as e:
-                print(f"        [-] [Конвейер] Ошибка при чтении HTML-данных товара {product_id}: {e}")
+                print(f"[-] [Конвейер] Ошибка при чтении HTML-данных товара {product_id}: {e}")
             finally:
                 # Вкладку гарантированно закрываем через await, очищая ОЗУ
                 await detail_page.close()
-                print(f"        [*] [Конвейер] Фоновая вкладка товара ID {product_id} успешно закрыта.")
+                print(f"[*] [Конвейер] Фоновая вкладка товара ID {product_id} успешно закрыта.")
         else:
             print(
-                f"        [-] [Конвейер] Не удалось получить доступ к вкладке для товара ID {product_id}. Поля останутся дефолтными."
+                f"[-] [Конвейер] Не удалось получить доступ к вкладке для товара ID {product_id}."
+                f" Поля останутся дефолтными."
             )
 
         # Склеиваем базу из листинга с глубокими характеристиками из карточки
         prod.update(deep_data)
         completed_products.append(prod)
-        print(f"    [+] [Конвейer] Данные товара ID {product_id} успешно объединены в один объект.")
+        print(f"[+] [Конвейer] Данные товара ID {product_id} успешно объединены в один объект.")
 
         # ЗАЩИТА WAF: Если товар в списке не последний, делаем случайную паузу человека
         if idx < total_items:
-            jitter_pause = random.uniform(1.5, 3.0)
+            jitter_pause = random.uniform(1.5, 3.0)  # noqa: S311
             print(
-                f"    [*] [Защита WAF] Имитация поведения человека: пауза перед следующим кликом {jitter_pause:.2f} sec..."
+                f"[*] [Защита WAF] Имитация поведения человека: пауза перед следующим кликом {jitter_pause:.2f} sec..."
             )
             await asyncio.sleep(jitter_pause)
 
@@ -305,16 +302,17 @@ async def collect_base_data_and_urls(product_cards, category_slug):
             if base_data:
                 page_batch.append(base_data)
                 print(
-                    f"    [+] [{idx}/{len(product_cards)}] Товар ID {base_data['item_id']} успешно добавлен в пакет листинга."
+                    f"[+] [{idx}/{len(product_cards)}] Товар ID {base_data['item_id']}"
+                    f" успешно добавлен в пакет листинга."
                 )
             else:
-                print(f"    [-] [{idx}/{len(product_cards)}] Пропущена пустая карточка или баннер.")
+                print(f"[-] [{idx}/{len(product_cards)}] Пропущена пустая карточка или баннер.")
 
         except Exception as e:
-            print(f"    [-] [Ошибка] Сбой разбора карточки №{idx}: {e}")
+            print(f"[-] [Ошибка] Сбой разбора карточки №{idx}: {e}")
             continue
 
-    print(f"\n[+] [ЭТАП 1 ЗАВЕРШЕН] Сбор страницы каталога окончен.")
+    print("\n[+] [ЭТАП 1 ЗАВЕРШЕН] Сбор страницы каталога окончен.")
     print(f"[+] Всего успешно обработано уникальных товаров в пакете: {len(page_batch)}")
 
     # Выводим красивый список всех собранных ссылок для визуального контроля
@@ -414,11 +412,13 @@ async def main():
             user_data_dir=user_data_dir,
             headless=True,  # Полностью невидимый интерфейс в памяти
             args=[
-                "--disable-blink-features=AutomationControlled", # НАШ ВАЖНЕЙШИЙ МАСКИРОВОЧНЫЙ ФЛАГ (ОСТАВЛЯЕМ)
-                "--blink-settings=imagesEnabled=false"           # НОВЫЙ ФЛАГ: ТАКТИЧЕСКОЕ ОТКЛЮЧЕНИЕ КАРТИНОК
+                "--disable-blink-features=AutomationControlled",  # НАШ ВАЖНЕЙШИЙ МАСКИРОВОЧНЫЙ ФЛАГ (ОСТАВЛЯЕМ)
+                "--blink-settings=imagesEnabled=false",  # НОВЫЙ ФЛАГ: ТАКТИЧЕСКОЕ ОТКЛЮЧЕНИЕ КАРТИНОК
             ],
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            " AppleWebKit/537.36 (KHTML, like Gecko)"
+            " Chrome/124.0.0.0 Safari/537.36",
             locale="ru-RU",
             timezone_id="Europe/Moscow",
         )
@@ -482,7 +482,7 @@ def save_products_to_csv(products_list, category_slug):
             # Пишем строки с товарами
             writer.writerows(products_list)
 
-        print(f"[+] [Экспорт Завершен] Все данные успешно сохранены на диск!")
+        print("[+] [Экспорт Завершен] Все данные успешно сохранены на диск!")
         print(f"[+] Итоговый файл проекта: {os.path.abspath(output_filename)}")
         return output_filename
 

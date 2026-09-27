@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from parent_base_classes import BaseConfig
+from core.base_classes import BaseConfig
 
 
 class GardarikaConfig(BaseConfig):

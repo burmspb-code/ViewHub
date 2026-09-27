@@ -9,13 +9,15 @@ def parse_category_clean(category_slug, max_pages=3):
     url = "https://goldapple.ru/" + str(category_slug)
     extracted_products = []
 
-    print(f"\n[ШАГ 1] Запуск Chromium браузера с нативной маскировкой...")
+    print("\n[ШАГ 1] Запуск Chromium браузера с нативной маскировкой...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
 
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                       " AppleWebKit/537.36 (KHTML, like Gecko)"
+                       " Chrome/124.0.0.0 Safari/537.36",
             locale="ru-RU",
             timezone_id="Europe/Moscow",
         )
@@ -39,7 +41,8 @@ def parse_category_clean(category_slug, max_pages=3):
                             slot_products = slot.get("products", [])
                             for prod in slot_products:
                                 save_product_json(prod, extracted_products, category_slug)
-                    except Exception:
+                    except Exception as e:
+                        print(f"[ПРЕДУПРЕЖДЕНИЕ] Не удалось обработать ответ: {e}")
                         pass
 
         page.on("response", handle_response)
@@ -83,9 +86,9 @@ def parse_category_clean(category_slug, max_pages=3):
 
                 if href and any(char.isdigit() for char in href) and ("/p/" in href or "-" in href):
                     text_block = link.get_text(separator="\n")
-                    lines = [l.strip() for l in text_block.split("\n") if l.strip()]
+                    lines = [line.strip() for line in text_block.split("\n") if line.strip()]
 
-                    if len(lines) >= 3 and any("₽" in l for l in lines):
+                    if len(lines) >= 3 and any("₽" in _ for _ in lines):
                         try:
                             # 1. Извлекаем самую первую (актуальную) цену со значком ₽
                             price = "0"
@@ -102,16 +105,16 @@ def parse_category_clean(category_slug, max_pages=3):
 
                             # 2. Фильтруем только текстовые строки (убираем объемы, рейтинги, проценты)
                             clean_strings = []
-                            for l in lines:
+                            for line in lines:
                                 if (
-                                    l.replace(".", "", 1).isdigit()
-                                    or "×" in l
-                                    or l.endswith("%")
-                                    or "₽" in l
-                                    or l.lower() in ["от", "купить"]
+                                    line.replace(".", "", 1).isdigit()
+                                    or "×" in line
+                                    or line.endswith("%")
+                                    or "₽" in line
+                                    or line.lower() in ["от", "купить"]
                                 ):
                                     continue
-                                clean_strings.append(l)
+                                clean_strings.append(line)
 
                             # Убираем дубликаты строк, идущие подряд (особенность верстки маркетплейса)
                             final_strings = []
@@ -167,7 +170,8 @@ def parse_category_clean(category_slug, max_pages=3):
                                         "url": f"https://goldapple.ru{href}" if not href.startswith("http") else href,
                                     }
                                 )
-                        except Exception:
+                        except Exception as e:
+                            print(f"Ошибка парсинга: {e}")
                             continue
 
 
@@ -219,7 +223,7 @@ if __name__ == "__main__":
         df = pd.DataFrame(result).drop_duplicates(subset=["item_id"])
         output_file = f"goldapple_{TARGET_CATEGORY}.csv"
         df.to_csv(output_file, index=False, encoding="utf-8-sig")
-        print(f"\n[УСПЕХ] Сборка выборки завершена!")
+        print("\n[УСПЕХ] Сборка выборки завершена!")
         print(f"Успешно сохранено уникальных товаров: {len(df)} в файл '{output_file}'")
         print("\nПревью таблицы:")
         print(df[['brand', 'name', 'current_price_rub']].head(5).to_string())

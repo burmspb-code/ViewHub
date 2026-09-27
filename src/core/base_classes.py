@@ -3,39 +3,63 @@
 сканирования, логирования, сохранения данных.
 """
 
+import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Tuple, Generator, List, ClassVar, Optional
+
+ColumnSpec = Tuple[str, ...]  # (тип, ограничение1, ограничение2, ...)
 
 
 class BaseConfig:
-    """Абстрактный класс конфигурации."""
+    """Класс конфигурации. Единый формат: голые Python-типы."""
 
-    # Описание колонок таблицы: имя → SQL-тип.
-    COLUMNS: Dict[str, str] = {}  # схема таблицы
-    KEY_COLUMN: str = ""          # колонка с уникальным ключом (например, item_id)
-    PAGE_URL_COLUMN: str = ""     # колонка с URL страницы (например, catalog_page_url)
+    # Бизнес-ключ для дедупликации (UPSERT)
+    DEDUP_COLUMN: str = "item_id"
 
-    def __init__(
-        self,
-        target_url: str,
-        keyword: str = "",
-        file_name: str = "",
-        config: Dict[str, Any] | None = None,
-    ) -> None:
+    # Схема: имя колонки -> Python-тип.
+    # Технические поля (id, created_at, page_number, session_id) сюда НЕ входят:
+    # их генерирует сейвер.
+    COLUMNS: ClassVar[Dict[str, type]] = {
+        "item_id": str,
+        "name": str,
+        "brand": str,
+        "price": float,
+        "url": str,
+    }
+
+    # Этим колонкам сейвер добавит NOT NULL при создании таблицы
+    NOT_NULL_COLUMNS: Tuple[str, ...] = ("item_id",)
+
+    # Ограничения уровня таблицы.
+    # Если PRIMARY KEY здесь не указан — сейвер сам добавит технический "id".
+    TABLE_CONSTRAINTS: Tuple[str, ...] = ("UNIQUE (item_id)",)
+
+    def __init__(self, target_url: str, keyword: str, file_name: str) -> None:
         self.target_url = target_url
         self.keyword = keyword
         self.file_name = file_name
-        self.config = config if config is not None else {}
 
-        # Проверка: ключ дедупа и URL-колонка обязаны существовать в схеме
-        if self.KEY_COLUMN and self.KEY_COLUMN not in self.COLUMNS:
-            raise ValueError(
-                f"KEY_COLUMN='{self.KEY_COLUMN}' отсутствует в COLUMNS"
+    @classmethod
+    def get_table_columns(cls) -> Dict[str, type]:
+        """Схема бизнес-колонок: имя -> Python-тип."""
+        return dict(cls.COLUMNS)
+
+    @classmethod
+    def get_key_column(cls) -> str:
+        """
+        Ключ для UPSERT: берём PRIMARY KEY (col) из TABLE_CONSTRAINTS.
+        Если его нет — используем DEDUP_COLUMN (технический 'id'
+        сейвер создаст сам).
+        """
+        for constraint in cls.TABLE_CONSTRAINTS or ():
+            m = re.search(
+                r'\bPRIMARY\s+KEY\s*$\s*"?(\w+)"?\s*$',
+                str(constraint),
+                re.IGNORECASE,
             )
-        if self.PAGE_URL_COLUMN and self.PAGE_URL_COLUMN not in self.COLUMNS:
-            raise ValueError(
-                f"PAGE_URL_COLUMN='{self.PAGE_URL_COLUMN}' отсутствует в COLUMNS"
-            )
+            if m:
+                return m.group(1)
+        return cls.DEDUP_COLUMN
 
 
 class BaseSaver(ABC):
@@ -44,11 +68,11 @@ class BaseSaver(ABC):
     Позволяет абстрагировать способ вывода данных (CSV, Excel, База данных).
     """
 
-    def __init__(self, file_name: str):
+    def __init__(self, file_name: Optional[str] = None) -> None:
         self.file_name = file_name
 
     @abstractmethod
-    def save(self, data: List[Dict[str, Any]]) -> bool:
+    def save(self, data: List[Dict[str, Any]], page_number: int | None) -> bool:
         """
         Записывает переданную порцию данных в целевое хранилище.
         """
@@ -87,8 +111,8 @@ class BaseParser(ABC):
     # Вызывается автоматически внутри метода cancel() перед остановкой основного цикла.
     # Предназначен для кастомной очистки ресурсов конкретного сайта.
     # Переопределение метода опционально. При переопределении вызывайте super()._on_cancel().
-    def _on_cancel(self) -> None:
-        pass # noqa: B027
+    def _on_cancel(self) -> None: # noqa: B027
+        pass
 
     @abstractmethod
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:

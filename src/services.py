@@ -13,7 +13,7 @@ from src.parser_worker import ParserWorker
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.parsers.golden_apple_parser import GoldenAppleParser
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
-from savers.sqlite_saver import SqliteSaver
+from src.savers.sqlite_saver import SQLiteSaver
 from src.scaner_worker import ScanerWorker
 
 logger = logging.getLogger(__name__)
@@ -244,7 +244,22 @@ def parsing_on_click(obj) -> None:
 
     config = GoldenAppleConfig(target_url, keyword, "golden_apple.xlsx")
     extractor = GoldenAppleExtractor(config)
-    saver = SqliteSaver(config, db_dir="data")
+
+    saver = SQLiteSaver()  # db_path подхватится из DBConfig: data/viewhub.db
+
+    try:
+        # Создаём таблицу и привязываем конфиг + session_id к сейверу
+        table_name = saver.init_for_config(config)
+        logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {saver.db_path}")
+
+    except Exception as e:
+        # Критическая ошибка инициализации БД: дальше запускать парсер нельзя
+        error_msg = f"❌ Критическая ошибка инициализации базы данных: {e}"
+        logger.error(error_msg)
+        # Прерываем выполнение этого блока (в зависимости от твоей архитектуры, здесь может быть return или raise)
+        raise RuntimeError("Не удалось подготовить базу данных. Парсинг остановлен.") from e
+
+    # Парсер создаем только если БД успешно инициализирована
     parser = GoldenAppleParser(config=config, extractor=extractor, saver=saver)
 
     # ====================================================================================

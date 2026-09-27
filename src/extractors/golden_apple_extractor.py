@@ -3,7 +3,7 @@ import re
 from typing import Any, List, Dict
 from bs4 import BeautifulSoup
 
-from parent_base_classes import BaseExtractor, BaseConfig
+from core.base_classes import BaseExtractor, BaseConfig
 
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ class GoldenAppleExtractor(BaseExtractor):
 
     def extract_deep_data(self, html_content: str) -> Dict[str, str]:
         """
-        Извлечение детальных характеристик (Описание, Применение, Страна) 
+        Извлечение детальных характеристик (Описание, Применение, Страна)
         из HTML-кода карточки товара (PDP).
         """
         detail_soup = BeautifulSoup(html_content, "html.parser")
@@ -57,8 +57,8 @@ class GoldenAppleExtractor(BaseExtractor):
                             break
 
         return {
-            "description": description, 
-            "usage": usage, 
+            "description": description,
+            "usage": usage,
             "country_of_origin": country_of_origin
         }
 
@@ -122,7 +122,7 @@ class GoldenAppleExtractor(BaseExtractor):
                 old_price_rub = current_price_rub
 
             if old_price_rub > current_price_rub and old_price_rub > 0:
-                calc_discount = int(round((1 - (current_price_rub / old_price_rub)) * 100))
+                calc_discount = round((1 - (current_price_rub / old_price_rub)) * 100)
                 discount_text = f"{calc_discount}%"
 
             # 6. Определение НАЛИЧИЯ товара
@@ -167,7 +167,7 @@ class GoldenAppleExtractor(BaseExtractor):
         Пакетный метод. Принимает список всех карточек страницы,
         запускает внутренний цикл и возвращает готовый массив базовых данных.
         """
-        # ИСПРАВЛЕНО: Забираем категорию напрямую из self.config.keyword
+        # Забираем категорию напрямую из self.config.keyword
         category_slug = "Каталог"
         if hasattr(self.config, "keyword") and self.config.keyword:
             category_slug = self.config.keyword.strip("/")
