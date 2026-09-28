@@ -3,6 +3,7 @@ import logging
 import hashlib
 import sqlite3
 import uuid
+import threading
 from contextlib import closing
 from urllib.parse import urlparse
 from datetime import datetime
@@ -29,6 +30,8 @@ class SQLiteSaver:
         self.table_name: Optional[str] = None
         self.session_id: Optional[str] = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Блокировка для потокобезопасности при конкурентных операциях с БД
+        self._lock = threading.Lock()
 
     def _connect(self):
         """Устанавливает соединение с SQLite и включает WAL-режим логирования."""
@@ -209,17 +212,18 @@ class SQLiteSaver:
                     row.append(item.get(c))  # page_number заберется отсюда автоматически!
             params.append(tuple(row))
 
-        # 5. Пакетная запись в БД
+        # 5. Пакетная запись в БД с блокировкой для потокобезопасности
         if params:
-            with closing(self._connect()) as conn:
-                conn.isolation_level = None
-                with conn:
-                    cursor = conn.cursor()
-                    cursor.execute("PRAGMA synchronous = OFF;")
-                    cursor.execute("PRAGMA journal_mode = WAL;")
+            with self._lock:
+                with closing(self._connect()) as conn:
+                    conn.isolation_level = None
+                    with conn:
+                        cursor = conn.cursor()
+                        cursor.execute("PRAGMA synchronous = OFF;")
+                        cursor.execute("PRAGMA journal_mode = WAL;")
 
-                    cursor.executemany(sql, params)
-                    affected += len(items)
+                        cursor.executemany(sql, params)
+                        affected += len(items)
 
         return affected
 
@@ -234,9 +238,27 @@ class SQLiteSaver:
         # Запрашиваем сразу две колонки: бизнес-ключ и номер страницы
         sql = f'SELECT "{dedup_col}", "page_number" FROM "{self.table_name}" WHERE "{dedup_col}" IN ({placeholders})'  # noqa: S608
 
-        with self._connect() as conn:
-            cursor = conn.cursor()
-            cursor.execute(sql, tuple(item_ids))
+        with self._lock:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, tuple(item_ids))
 
-            # Собираем результат в словарь: { 'ID_товара': номер_страницы_в_БД }
-            return {str(row[0]): row[1] for row in cursor.fetchall()}
+                # Собираем результат в словарь: { 'ID_товара': номер_страницы_в_БД }
+                return {str(row[0]): row[1] for row in cursor.fetchall()}
+
+    def get_last_page_number(self) -> int:
+        """Возвращает последний сохраненный номер страницы из БД для возобновления парсинга."""
+        if not self.table_name:
+            return 1
+
+        sql = f'SELECT MAX("page_number") FROM "{self.table_name}"'  # noqa: S608
+
+        with self._lock:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                result = cursor.fetchone()
+
+                if result and result[0] is not None:
+                    return result[0]
+                return 1

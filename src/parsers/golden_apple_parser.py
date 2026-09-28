@@ -24,8 +24,10 @@ class GoldenAppleParser(BaseParser):
 
     def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, saver: SQLiteSaver):
         super().__init__(config, extractor, saver)
-        # Задаем начальные значения для пагинации
+        # Номер текущей страницы, всегда начинаем с первой страницы
         self.current_page = 1
+        # Счетчик пустых страниц подряд для надежной остановки
+        self.empty_pages_count = 0
         # Создаем папку для профиля браузера
         self.user_data_dir = os.path.join(os.getcwd(), "chrome_user_profile")
 
@@ -59,12 +61,12 @@ class GoldenAppleParser(BaseParser):
             # Создаем чистую страницу в текущем изолированном контексте
             page = context.new_page()
 
-            # Переходим на страницу товара с ограничением по времени (30 секунд)
-            page.goto(product_url, wait_until="domcontentloaded", timeout=30000)
+            # Переходим на страницу товара с ограничением по времени (60 секунд)
+            page.goto(product_url, wait_until="domcontentloaded", timeout=60000)
 
             # ЖЕСТКИЙ СТОПОР: Ждем появление главного заголовка страницы (название духов / бренд)
-            # Задаем конечный таймаут в 20 секунд, чтобы поток не завис, если страница недоступна
-            page.locator("h1").first.wait_for(state="attached", timeout=20000)
+            # Задаем конечный таймаут в 60 секунд, чтобы поток не завис, если страница недоступна
+            page.locator("h1").first.wait_for(state="attached", timeout=60000)
 
             # Небольшая контролируемая пауза для окончательного монтажа Vue-компонентов
             self._smart_sleep(1.0)
@@ -95,11 +97,15 @@ class GoldenAppleParser(BaseParser):
 
         try:
             # Загружаем базовый URL
-            #page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.goto(url, wait_until="load", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             # Ждем прикрепления тега в DOM (attached) вместо видимости на экране (visible)
             # Это полностью исключает TimeoutError в скрытом (headless) режиме!
-            page.locator("article").first.wait_for(state="attached", timeout=30000)
+            try:
+                page.locator("article").first.wait_for(state="attached", timeout=10000)
+            except Exception as e:
+                # Превращаем ошибку в строку, разбиваем по строкам и берем первую
+                first_line = str(e).splitlines()[0] if str(e) else "Unknown error"
+                logger.debug(f"Article locator timed out or failed: {first_line}")
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
             page.evaluate("window.scrollTo(0, 2500);")
@@ -113,7 +119,7 @@ class GoldenAppleParser(BaseParser):
         except Exception as e:
             if not self._is_running:
                 raise ExceptionStopParser("Процесс отменен пользователем.") from e
-            logger.error(f"❌ Не удалось прогрузить страницу каталога №{self.current_page}: {e}")
+            logger.error(f"❌ Не удалось прогрузить страницу каталога №{self.current_page}: {str(e).splitlines()[0]}")
             raise e
 
 
@@ -187,34 +193,41 @@ class GoldenAppleParser(BaseParser):
                     to_gui(f"🌐 Загрузка страницы каталога №{self.current_page}...")
 
                     catalog_page = self.load_catalog_page(page, url)
-                    current_url = catalog_page.url
 
-                    # Проверка на конец пагинации
-                    if self.current_page > 1 and f"p={self.current_page}" not in current_url:
-                        to_gui("🏁 Каталог полностью пройден. Завершение работы.")
-                        break
-
+                    # Получение карточек товара на странице
                     product_cards = self.count_and_get_products_on_page(catalog_page)
-                    if not product_cards:
-                        to_gui(f"🏁 На странице №{self.current_page} нет товаров. Останов.")
-                        break
 
                     to_gui(f"🔎 Найдено {len(product_cards)} карточек. Сбор базовых данных...")
+
+                    # Извлекаем карточки товаров
                     base_items = self.extractor.extract_data(product_cards)
 
-                    # ----------------- Проверка на остановку процесса по условию ------------------------
-                    # 1. Собираем чистый список ID с текущей страницы парсинга
+                    # Инициализируем список товаров для детального просмотра (по умолчанию все)
+                    new_base_items = base_items
+
+                    # ----------------- Логика для остановки процесса пагинации ------------------------
+                    # Собираем чистый список ID товаров с текущей страницы парсинга
                     item_id_list = [item.get("item_id") for item in base_items if item.get("item_id")]
 
-                    # 2. Делаем ОДИН запрос к БД и получаем словарь {id: page_number}
+                    # Страховочное условие остановки - получения 2 страниц подряд без товаров
+                    if len(item_id_list) == 0:
+                        # Увеличиваем счетчик пустых страниц
+                        self.empty_pages_count += 1
+
+                        if self.empty_pages_count >= 2:
+                            to_gui(f"🏁 {self.empty_pages_count} пустые страницы подряд. Остановка парсера.")
+                            break
+
+                        continue
+
+                    # Обнуляем счетчик пустых страниц
+                    self.empty_pages_count = 0
+
+                    # Делаем ОДИН запрос к БД и получаем словарь {id: page_number}
                     db_items_pages = self.saver.check_existing_items_with_pages(item_id_list)
 
-                    # 3. УМНОЕ УСЛОВИЕ ОСТАНОВКИ
                     # Считаем, сколько товаров с текущей страницы УЖЕ лежат в БД на СТАРЫХ страницах
                     old_duplicates_count = 0
-
-                    # Флаг закливания пагинации
-                    page_cycling = False
 
                     for item_id in item_id_list:
                         string_id = str(item_id)
@@ -223,34 +236,33 @@ class GoldenAppleParser(BaseParser):
                             # Если есть дубликаты, увеличиваем счетчик
                             old_duplicates_count += 1
 
-                            # Достаем кортеж из словаря базы данных
-                            db_row = db_items_pages[string_id]
-
-                            # db_row — это физический номер страницы из БД (INTEGER).
-                            if db_row < self.current_page:
-                                page_cycling = True # Выставляем флаг зацикливания
-
                     to_gui(
-                        f"📊 Анализ дубликатов со старых страниц в БД: {old_duplicates_count} из {len(item_id_list)}"
+                        f"📊 Обнаружено дубликатов в базе: {old_duplicates_count} из {len(item_id_list)}"
                     )
 
-                    # Финальный триггер «Победы»: если ВСЯ страница состоит из дубликатов
-                    # со старых страниц, значит мы полностью уперлись в уже пройденный хвост каталога — СТОП.
-                    if old_duplicates_count == len(item_id_list) and page_cycling:
-                        to_gui(f"🏁 Обнаружен пройденный хвост каталога на стр."
-                               f" {self.current_page}. Остановка парсера.")
-                        break
+                    # Если есть дубликаты
+                    if old_duplicates_count:
+                        # Собираем НЕзадублированнные товары
+                        new_base_items = [item for item in base_items if str(item.get("item_id")) not in db_items_pages]
 
-                    # Получаем только те товары, которых нет в БД
-                    new_base_items = [item for item in base_items if str(item.get("item_id")) not in db_items_pages]
+                    # Если на странице все товары уже есть в БД завершаем цикл
+                    if len(item_id_list) == old_duplicates_count:
 
-                    # Если новых товаров нет завершаем цикл и увеличиваем счетчик страниц
-                    if len(new_base_items) == 0:
+                        # --- Проверка на зацикливание парсинга ---
+                        # Получаем максимальный номер страницы из БД
+                        max_page_in_db = self.saver.get_last_page_number()
+
+                        # Если текущий номер больше максимального - ЗАЦИКЛИВАНИЕ
+                        if self.current_page > max_page_in_db:
+                            to_gui("🏁 Зацикливание пагинации. Остановка. Все товары сохранены.")
+                            break
+
                         self.current_page += 1
                         continue
+                    # ------------------------------------------------------------------------------------
 
                     page_batch = []
-                    total_in_batch = len(base_items)
+                    total_in_batch = len(new_base_items)
                     saved_in_page = 0
 
                     to_gui(f"🚀 Запуск глубокого обхода {total_in_batch} карточек поштучно...")
@@ -332,8 +344,12 @@ class GoldenAppleParser(BaseParser):
                     self.current_page += 1
 
             except ExceptionStopParser as e:
-                context.close()
                 raise e
             except Exception as e:
-                context.close()
                 raise e
+            finally:
+                # Корректная очистка ресурсов: сначала страница, потом контекст
+                if 'page' in locals() and not page.is_closed():
+                    page.close()
+                if 'context' in locals():
+                    context.close()
