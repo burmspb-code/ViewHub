@@ -3,13 +3,20 @@
 import json
 import logging
 import sqlite3
-
+import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 import pandas as pd
+
 from contextlib import suppress
 
-import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 from PyQt6.QtCore import QThread
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import (
+    QFileDialog,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget
+)
 
 from scaners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
@@ -249,6 +256,10 @@ def parsing_on_click(obj) -> None:
     if hasattr(obj, "btn_send_parsing"):
         obj.btn_send_parsing.setEnabled(False)
 
+    # Включаем кнопку отмены
+    if hasattr(obj, "btn_cancel_parsing"):
+        obj.btn_cancel_parsing.setEnabled(True)
+
     obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
 
@@ -470,6 +481,117 @@ def parsing_file_save(df, path_name, obj) -> None:
             obj.result_display.append(f"❌ Ошибка записи файла: {error_msg}")
 
 
+def parsing_preview_on_click(obj):
+    """Открытие виджета с таблицей из БД в zone2."""
+    # Проверяем, не открыта ли уже таблица
+    if hasattr(obj, "db_viewer") and obj.db_viewer is not None:
+        logger.warning("Таблица уже открыта. Сначала закройте текущую таблицу.")
+        return
+
+    # Получаем парсер, если он был создан при запуске парсинга
+    parser = getattr(obj, "parser", None)
+    if not parser:
+        logger.warning("Ошибка экспорта. Парсер не инициализирован. Сначала запустите парсинг.")
+        return
+
+    # Получаем путь к БД и имя таблицы
+    db_path = getattr(parser.saver, "db_path", None)
+    table_name = getattr(parser.saver, "table_name", None)
+
+    if not db_path or not table_name:
+        logger.warning("Ошибка экспорта. Не найден путь к БД или имя таблицы.")
+        return
+
+    # Делаем кнопку временно неактивной, чтобы избежать спам-кликов
+    if hasattr(obj, "btn_preview_parsing"):
+        obj.btn_preview_parsing.setEnabled(False)
+
+    try:
+        # Создаем виджет с таблицей
+        viewer = create_db_viewer(db_path, table_name, obj)
+        if viewer:
+            # Сохраняем ссылку на виджет
+            obj.db_viewer = viewer
+            # Добавляем виджет в zone2
+            if hasattr(obj, "zone2"):
+                layout = obj.zone2.layout()
+                # Скрываем result_display
+                if hasattr(obj, "result_display"):
+                    obj.result_display.hide()
+                # Добавляем viewer
+                layout.addWidget(viewer)
+                viewer.show()
+
+    finally:
+        # Разблокируем кнопку только если viewer не был создан
+        if not (hasattr(obj, "db_viewer") and obj.db_viewer is not None):
+            if hasattr(obj, "btn_preview_parsing"):
+                obj.btn_preview_parsing.setEnabled(True)
+
+def close_db_viewer(obj):
+    """Закрытие виджета с таблицей и возврат к result_display."""
+    if hasattr(obj, "db_viewer") and obj.db_viewer:
+        layout = obj.zone2.layout()
+        layout.removeWidget(obj.db_viewer)
+        obj.db_viewer.deleteLater()
+        obj.db_viewer = None
+        # Показываем result_display
+        if hasattr(obj, "result_display"):
+            obj.result_display.show()
+        # Разблокируем кнопку просмотра
+        if hasattr(obj, "btn_preview_parsing"):
+            obj.btn_preview_parsing.setEnabled(True)
+
+def create_db_viewer(db_path: str, table_name: str, obj) -> QWidget:
+    """Создает виджет для просмотра таблицы SQLite через pandas + QTableWidget."""
+    widget = QWidget()
+    layout = QVBoxLayout(widget)
+
+    try:
+        # Читаем данные через pandas (потокобезопасно)
+        conn = sqlite3.connect(db_path)
+        try:
+            df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)  # noqa: S608
+        finally:
+            conn.close()
+
+        if df.empty:
+            if hasattr(obj, "result_display"):
+                obj.result_display.append("⚠️ Таблица пуста")
+            return None
+
+        # Создаем кнопку закрытия
+        close_btn = QPushButton("✕ Закрыть")
+        close_btn.clicked.connect(lambda: close_db_viewer(obj))
+        close_btn.setMaximumHeight(40)
+        layout.addWidget(close_btn)
+
+        # Создаем QTableWidget
+        table = QTableWidget()
+        table.setRowCount(len(df))
+        table.setColumnCount(len(df.columns))
+        table.setHorizontalHeaderLabels(df.columns)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Отключаем редактирование
+
+        # Заполняем таблицу данными
+        for row_idx, row_data in df.iterrows():
+            for col_idx, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value))
+                table.setItem(row_idx, col_idx, item)
+
+        # Автоматическое растягивание колонок
+        table.resizeColumnsToContents()
+
+        layout.addWidget(table)
+        return widget
+
+    except Exception as e:
+        logger.error(f"Ошибка при создании viewer: {e}")
+        if hasattr(obj, "result_display"):
+            obj.result_display.append(f"❌ Ошибка при создании viewer: {e}")
+        return None
+
+
 # --- Внутренние вспомогательные функции для обработки сигналов потока ---
 def _update_parsing_status(obj, message: str) -> None:
     """Пишет рабочие сообщения в информационное окно."""
@@ -487,8 +609,9 @@ def _stop_handler(obj, msg: str) -> None:
     if getattr(obj, "btn_send_parsing", None):
         obj.btn_send_parsing.setEnabled(True)
 
+    # Отключаем кнопку отмены парсинга
     if getattr(obj, "btn_cancel_parsing", None):
-        obj.btn_cancel_parsing.setEnabled(True)
+        obj.btn_cancel_parsing.setEnabled(False)
 
     if getattr(obj, "btn_cancel_scanning", None):
         obj.btn_cancel_scanning.setEnabled(True)
@@ -502,6 +625,10 @@ def _parsing_success_handler(obj, output_file: str="") -> None:
 
     if getattr(obj, "btn_send_parsing", None):
         obj.btn_send_parsing.setEnabled(True)
+
+    # Отключаем кнопку отмены
+    if getattr(obj, "btn_cancel_parsing", None):
+        obj.btn_cancel_parsing.setEnabled(False)
 
     if output_file:
         # Показываем сообщение об успешном завершении

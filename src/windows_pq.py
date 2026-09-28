@@ -33,6 +33,7 @@ from src.core.styles import (
     CANCEL_BUTTON_STYLE,
     TOGGLE_PWD_VISIBILITY_STYLE,
     EXPORT_BUTTON_STYLE,
+    PREVIEW_BUTTON_STYLE
 )
 from src.services import (
     auth_on_click,
@@ -42,6 +43,7 @@ from src.services import (
     scanning_on_click,
     scanning_cancel_on_click,
     parsing_export_on_click,
+    parsing_preview_on_click
 )
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,7 @@ class MainWindow(QWidget):
         self.key_word_input = None
         self.btn_cancel_parsing = None
         self.btn_export_parsing = None
+        self.btn_preview_parsing = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -121,6 +124,7 @@ class MainWindow(QWidget):
 
         self.result_display = None
         self.zone2 = None
+        self.db_viewer = None  # Виджет для просмотра таблицы БД
 
         self.zone3 = None
         self.log_display = None
@@ -367,7 +371,14 @@ class MainWindow(QWidget):
         self.btn_cancel_parsing.setMinimumHeight(42)
         self.btn_cancel_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel_parsing.setStyleSheet(CANCEL_BUTTON_STYLE)
+        self.btn_cancel_parsing.setEnabled(False)  # Отключена по умолчанию
         parsing_layout.addWidget(self.btn_cancel_parsing)
+
+        self.btn_preview_parsing = QPushButton("Просмотр")
+        self.btn_preview_parsing.setMinimumHeight(42)
+        self.btn_preview_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_preview_parsing.setStyleSheet(PREVIEW_BUTTON_STYLE)
+        parsing_layout.addWidget(self.btn_preview_parsing)
 
         self.btn_export_parsing = QPushButton("Экспорт")
         self.btn_export_parsing.setMinimumHeight(42)
@@ -435,8 +446,9 @@ class MainWindow(QWidget):
 
         top_splitter.addWidget(self.zone1)
         top_splitter.addWidget(self.zone2)
-        top_splitter.setStretchFactor(0, 1)
-        top_splitter.setStretchFactor(1, 2)
+        top_splitter.setStretchFactor(0, 0)  # zone1 фиксированной ширины
+        top_splitter.setStretchFactor(1, 1)  # zone2 занимает всё оставшееся пространство
+        top_splitter.setSizes([350, 750])  # Фиксированная ширина zone1 = 350px
 
         # --- СОЗДАЕМ ГЛАВНЫЙ ВЕРТИКАЛЬНЫЙ СПЛИТТЕР ---
         main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -544,6 +556,7 @@ class MainWindow(QWidget):
         self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
         self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self)) # Отмена парсинга
         self.btn_export_parsing.clicked.connect(lambda: parsing_export_on_click(self)) # Экспорт парсинга
+        self.btn_preview_parsing.clicked.connect(lambda: parsing_preview_on_click(self)) # Просмотр парсинга
 
         # Настройки
         self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек

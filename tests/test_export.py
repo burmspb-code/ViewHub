@@ -4,26 +4,30 @@ import json
 import httpx
 import sqlite3
 import pandas as pd
+import gc
 
 from unittest.mock import MagicMock, patch
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QWidget, QTableWidget, QPushButton
 from PyQt6.QtCore import QThread
 
 from src.services import (
     parsing_file_save,
     parsing_db_read,
     parsing_export_init,
-    _update_parsing_status, # noqa
-    _stop_handler, # noqa
-    _parsing_success_handler, # noqa
-    _scanning_success_handler, # noqa
+    _update_parsing_status,
+    _stop_handler,
+    _parsing_success_handler,
+    _scanning_success_handler,
     scanning_on_click,
     auth_on_click,
     scanning_cancel_on_click,
     request_on_click,
     parsing_cancel_on_click,
     parsing_export_on_click,
-    parsing_on_click
+    parsing_on_click,
+    parsing_preview_on_click,
+    close_db_viewer,
+    create_db_viewer
 )
 
 
@@ -103,7 +107,7 @@ def test_parsing_db_read_success(setup_temporary_db):
     assert df.iloc[0]["name"] == "Помада Golden Apple"
 
 
-import gc  # <--- Добавьте импорт в начало файла тестов
+
 
 @pytest.mark.filterwarnings("ignore:unclosed database:ResourceWarning")
 def test_parsing_db_read_empty_table(setup_temporary_db):
@@ -301,7 +305,7 @@ def test_stop_handler_full_ui_unlock():
     # ПРОВЕРКИ АКТИВАЦИИ КНОПОК ИНТЕРФЕЙСА:
     mock_obj.btn_send_scanning.setEnabled.assert_called_once_with(True)
     mock_obj.btn_send_parsing.setEnabled.assert_called_once_with(True)
-    mock_obj.btn_cancel_parsing.setEnabled.assert_called_once_with(True)
+    mock_obj.btn_cancel_parsing.setEnabled.assert_called_once_with(False)  # Кнопка отмены парсинга отключается
     mock_obj.btn_cancel_scanning.setEnabled.assert_called_once_with(True)
 
 
@@ -329,6 +333,7 @@ def test_parsing_success_handler_with_file():
     mock_obj.result_display = MagicMock()
     mock_obj.btn_send_scanning = MagicMock()
     mock_obj.btn_send_parsing = MagicMock()
+    mock_obj.btn_cancel_parsing = MagicMock()
 
     test_file = "C:/exports/products.xlsx"
 
@@ -338,6 +343,7 @@ def test_parsing_success_handler_with_file():
     # ПРОВЕРКИ АКТИВАЦИИ КНОПОК:
     mock_obj.btn_send_scanning.setEnabled.assert_called_once_with(True)
     mock_obj.btn_send_parsing.setEnabled.assert_called_once_with(True)
+    mock_obj.btn_cancel_parsing.setEnabled.assert_called_once_with(False)  # Кнопка отмены парсинга отключается
 
     # ПРОВЕРКИ ТЕКСТОВОГО ВЫВОДА (Порядок вызовов важен):
     mock_obj.result_display.append.assert_any_call("🎉 Успех!")
@@ -351,6 +357,7 @@ def test_parsing_success_handler_without_file():
     mock_obj.result_display = MagicMock()
     mock_obj.btn_send_scanning = MagicMock()
     mock_obj.btn_send_parsing = MagicMock()
+    mock_obj.btn_cancel_parsing = MagicMock()
 
     # Вызываем без указания файла
     _parsing_success_handler(mock_obj, output_file="")
@@ -358,6 +365,7 @@ def test_parsing_success_handler_without_file():
     # Кнопки всё равно обязаны включиться обратно
     mock_obj.btn_send_scanning.setEnabled.assert_called_once_with(True)
     mock_obj.btn_send_parsing.setEnabled.assert_called_once_with(True)
+    mock_obj.btn_cancel_parsing.setEnabled.assert_called_once_with(False)  # Кнопка отмены парсинга отключается
 
     # Текстовые сообщения об успехе файла НЕ должны были вызываться
     mock_obj.result_display.append.assert_not_called()
@@ -481,7 +489,7 @@ def test_auth_on_click_success():
         mock_obj.result_display.append.assert_any_call("Статус: Авторизован.\nТокен: JWT_TOKEN_XYZ_123")
 
         # Проверяем, что токен и адрес прописались в контекст главного окна
-        assert mock_obj.auth_token == "JWT_TOKEN_XYZ_123"
+        assert mock_obj.auth_token == "JWT_TOKEN_XYZ_123" # noqa: S105
         assert mock_obj.base_url == "https://site.com"
 
 
@@ -547,7 +555,7 @@ def test_request_on_click_missing_endpoint():
     mock_obj = MagicMock()
     # Пользователь авторизован
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "valid_token_123"
+    mock_obj.auth_token = "valid_token_123" # noqa: S105
     # Но эндпоинт пустой (с пробелами для проверки strip)
     mock_obj.api_request_url_input.text.return_value = "   "
     mock_obj.result_display = MagicMock()
@@ -563,7 +571,7 @@ def test_request_on_click_success_200():
     """Проверяем успешный GET-запрос и вывод форматированного JSON."""
     mock_obj = MagicMock()
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "secret_jwt_token"
+    mock_obj.auth_token = "secret_jwt_token" # noqa: S105
     mock_obj.api_request_url_input.text.return_value = "https://site.com/v1/tasks/"
     mock_obj.result_display = MagicMock()
 
@@ -603,7 +611,7 @@ def test_request_on_click_server_error():
     """Проверяем обработку некорректных статус-кодов (например, 500 Internal Error)."""
     mock_obj = MagicMock()
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "token"
+    mock_obj.auth_token = "token" # noqa: S105
     mock_obj.api_request_url_input.text.return_value = "https://site.com/error/"
     mock_obj.result_display = MagicMock()
 
@@ -620,14 +628,14 @@ def test_request_on_click_server_error():
         request_on_click(mock_obj)
 
         # Должна сработать ветка else и вывести ошибку сервера в UI
-        mock_obj.result_display.append.assert_any_call(f"Код: 500\nДетали: Internal Server Error Details")
+        mock_obj.result_display.append.assert_any_call("Код: 500\nДетали: Internal Server Error Details")
 
 
 def test_request_on_click_network_exception():
     """Проверяем перехват исключений httpx при критическом сбое сети."""
     mock_obj = MagicMock()
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "token"
+    mock_obj.auth_token = "token" # noqa: S105
     mock_obj.api_request_url_input.text.return_value = "https://site.com/timeout/"
     mock_obj.result_display = MagicMock()
 
@@ -925,6 +933,7 @@ def test_parsing_on_click_success_thread_start():
     mock_obj.key_word_input.text.return_value = "помада"
     mock_obj.btn_send_scanning = MagicMock()
     mock_obj.btn_send_parsing = MagicMock()
+    mock_obj.btn_cancel_parsing = MagicMock()
     mock_obj.result_display = MagicMock()
 
     # Создаем изолированные моки для треда и воркера
@@ -950,24 +959,266 @@ def test_parsing_on_click_success_thread_start():
         mock_obj.btn_send_scanning.setEnabled.assert_called_once_with(False)
         mock_obj.btn_send_parsing.setEnabled.assert_called_once_with(False)
 
-        # 3. Объект парсера успешно прописался в контекст главного окна
+        # 3. Кнопка отмены парсинга включается при запуске
+        mock_obj.btn_cancel_parsing.setEnabled.assert_called_once_with(True)
+
+        # 4. Объект парсера успешно прописался в контекст главного окна
         assert mock_obj.parser == mock_parser
 
-        # 4. Проверяем перенос воркера в фоновый тред и установку callback прогресса
+        # 5. Проверяем перенос воркера в фоновый тред и установку callback прогресса
         mock_worker.moveToThread.assert_called_once_with(mock_thread)
         assert mock_parser.progress_callback == mock_worker.progress_signal.emit
 
-        # 5. Проверяем связывание QT-сигналов и логику автоматической очистки памяти
+        # 6. Проверяем связывание QT-сигналов и логику автоматической очистки памяти
         mock_thread.started.connect.assert_called_once_with(mock_worker.run)
         mock_worker.finished_signal.connect.assert_any_call(mock_thread.quit)
         mock_worker.stop_signal.connect.assert_any_call(mock_thread.quit)
         mock_thread.finished.connect.assert_any_call(mock_thread.deleteLater)
         mock_thread.finished.connect.assert_any_call(mock_worker.deleteLater)
 
-        # 6. В лог панели вывелась информация о запуске
+        # 7. В лог панели вывелась информация о запуске
         mock_obj.result_display.append.assert_called_once_with(
             "⏳ Запуск парсера для сайта: https://goldapple.ru, ключ: помада"
         )
 
         # 7. Фоновый поток выполнения Playwright физически запущен
         mock_thread.start.assert_called_once()
+
+
+def test_parsing_preview_on_click_already_open():
+    """Проверяем, что если таблица уже открыта, функция делает ранний выход."""
+    mock_obj = MagicMock()
+    # Имитируем, что viewer уже создан и активен
+    mock_obj.db_viewer = MagicMock()
+
+    with patch("src.services.logger") as mock_logger, patch("src.services.create_db_viewer") as mock_create:
+        parsing_preview_on_click(mock_obj)
+
+        # Должно записаться предупреждение, а создание виджета не должно вызываться
+        mock_logger.warning.assert_called_once_with("Таблица уже открыта. Сначала закройте текущую таблицу.")
+        mock_create.assert_not_called()
+
+
+def test_parsing_preview_on_click_missing_parser():
+    """Проверяем прерывание функции, если парсер не инициализирован."""
+    mock_obj = MagicMock()
+    mock_obj.db_viewer = None
+    del mock_obj.parser  # Парсер отсутствует
+
+    with patch("src.services.logger") as mock_logger:
+        parsing_preview_on_click(mock_obj)
+
+        mock_logger.warning.assert_called_once_with(
+            "Ошибка экспорта. Парсер не инициализирован. Сначала запустите парсинг."
+        )
+
+
+def test_parsing_preview_on_click_missing_db_or_table():
+    """Проверяем прерывание, если в парсере нет пути к БД или имени таблицы."""
+    mock_obj = MagicMock()
+    mock_obj.db_viewer = None
+    mock_obj.parser.saver.db_path = None  # Путь пустой
+    mock_obj.parser.saver.table_name = "products"
+
+    with patch("src.services.logger") as mock_logger:
+        parsing_preview_on_click(mock_obj)
+
+        mock_logger.warning.assert_called_once_with("Ошибка экспорта. Не найден путь к БД или имя таблицы.")
+
+
+def test_parsing_preview_on_click_success_mount():
+    """Проверяем успешное создание viewer, скрытие логов и монтирование в интерфейс."""
+    mock_obj = MagicMock()
+    mock_obj.db_viewer = None
+    mock_obj.parser.saver.db_path = "data/viewhub.db"
+    mock_obj.parser.saver.table_name = "golden_apple"
+
+    mock_obj.btn_preview_parsing = MagicMock()
+    mock_obj.result_display = MagicMock()
+
+    # Имитируем layout у zone2
+    mock_layout = MagicMock()
+    mock_obj.zone2.layout.return_value = mock_layout
+
+    # Создаем фальшивый виджет таблицы
+    mock_viewer = MagicMock()
+
+    with patch("src.services.create_db_viewer", return_value=mock_viewer) as mock_create:
+        parsing_preview_on_click(mock_obj)
+
+        # 1. Проверяем, что конструктор viewer вызвался с правильными параметрами
+        mock_create.assert_called_once_with("data/viewhub.db", "golden_apple", mock_obj)
+
+        # 2. Кнопка предпросмотра заблокировалась, и ссылка на виджет сохранилась в obj
+        mock_obj.btn_preview_parsing.setEnabled.assert_any_call(False)
+        assert mock_obj.db_viewer == mock_viewer
+
+        # 3. Предыдущее текстовое окно скрылось, а новая таблица вмонтировалась в layout
+        mock_obj.result_display.hide.assert_called_once()
+        mock_layout.addWidget.assert_called_once_with(mock_viewer)
+        mock_viewer.show.assert_called_once()
+
+        # 4. ВАЖНО: В блоке finally кнопка НЕ должна была включиться обратно,
+        # так как viewer успешно создан (условие в finally не выполнилось)
+        # Проверяем, что последний вызов setEnabled НЕ был True
+        assert mock_obj.btn_preview_parsing.setEnabled.call_args_list[-1][0][0] is False
+
+
+def test_parsing_preview_on_click_finally_fallback_unblock():
+    """Проверяем, что если viewer не создался (вернул None), кнопка разблокируется."""
+    mock_obj = MagicMock()
+    mock_obj.db_viewer = None
+    mock_obj.parser.saver.db_path = "data/viewhub.db"
+    mock_obj.parser.saver.table_name = "golden_apple"
+    mock_obj.btn_preview_parsing = MagicMock()
+
+    # Имитируем, что функция создания виджета вернула None (например, сбой SQLite)
+    with patch("src.services.create_db_viewer", return_value=None):
+        parsing_preview_on_click(mock_obj)
+
+        # Ссылка в obj осталась None
+        assert mock_obj.db_viewer is None
+        # Блок finally увидел, что viewer нет, и разблокировал кнопку для повторной попытки
+        mock_obj.btn_preview_parsing.setEnabled.assert_any_call(False)
+        mock_obj.btn_preview_parsing.setEnabled.assert_called_with(True)
+
+
+def test_close_db_viewer_success():
+    """Проверяем успешный демонтаж виджета таблицы, очистку памяти и восстановление UI."""
+    mock_obj = MagicMock()
+    mock_obj.btn_preview_parsing = MagicMock()
+    mock_obj.result_display = MagicMock()
+
+    # Имитируем активный виджет таблицы
+    mock_viewer = MagicMock()
+    mock_obj.db_viewer = mock_viewer
+
+    # Имитируем layout у zone2
+    mock_layout = MagicMock()
+    mock_obj.zone2.layout.return_value = mock_layout
+
+    # Вызываем тестируемую функцию закрытия
+    close_db_viewer(mock_obj)
+
+    # ПРОВЕРКИ:
+    # 1. Виджет таблицы удален из компоновщика zone2
+    mock_layout.removeWidget.assert_called_once_with(mock_viewer)
+
+    # 2. Вызван метод безопасного удаления объекта из памяти Qt
+    mock_viewer.deleteLater.assert_called_once()
+
+    # 3. Ссылка на виджет внутри главного окна очищена
+    assert mock_obj.db_viewer is None
+
+    # 4. Текстовое окно логов вернулось на экран, а кнопка предпросмотра снова активна
+    mock_obj.result_display.show.assert_called_once()
+    mock_obj.btn_preview_parsing.setEnabled.assert_called_once_with(True)
+
+
+def test_close_db_viewer_already_closed():
+    """Проверяем, что если виджет таблицы не существует, функция ничего не делает."""
+    mock_obj = MagicMock()
+    mock_obj.db_viewer = None  # Таблица уже закрыта
+    mock_obj.btn_preview_parsing = MagicMock()
+    mock_obj.result_display = MagicMock()
+
+    mock_layout = MagicMock()
+    mock_obj.zone2.layout.return_value = mock_layout
+
+    close_db_viewer(mock_obj)
+
+    # Никакие методы удаления и переключения UI не должны вызываться
+    mock_layout.removeWidget.assert_not_called()
+    mock_obj.result_display.show.assert_not_called()
+    mock_obj.btn_preview_parsing.setEnabled.assert_not_called()
+
+def test_create_db_viewer_empty_table(monkeypatch, qtbot):
+    """Проверяем, что если таблица в БД пуста, функция возвращает None и пишет в UI."""
+    mock_obj = MagicMock()
+    mock_obj.result_display = MagicMock()
+
+    # Имитируем возврат пустого DataFrame из pandas
+    monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: pd.DataFrame())
+
+    # Вызываем функцию (передавая qtbot, чтобы инициализировать контекст Qt)
+    viewer = create_db_viewer("dummy.db", "products", mock_obj)
+
+    assert viewer is None
+    mock_obj.result_display.append.assert_called_once_with("⚠️ Таблица пуста")
+
+
+def test_create_db_viewer_success(monkeypatch, qtbot):
+    """Проверяем успешную сборку виджета, таблицы и заполнение её ячеек данными."""
+    mock_obj = MagicMock()
+
+    # Готовим тестовые данные (2 строки, 2 колонки)
+    test_df = pd.DataFrame({
+        "ID": [1,2],
+        "Название": ["Товар А", "Товар Б"]
+    })
+    monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: test_df)
+
+    # Вызываем функцию
+    viewer = create_db_viewer("dummy.db", "products", mock_obj)
+
+    # РЕШЕНИЕ: Регистрируем виджет в контексте qtbot, чтобы избежать ошибки 0xC0000409
+    qtbot.addWidget(viewer)
+
+    # ПРОВЕРКИ:
+    assert viewer is not None
+    assert isinstance(viewer, QWidget)
+
+    layout = viewer.layout()
+    assert layout is not None
+    assert layout.count() == 2
+
+    button = layout.itemAt(0).widget()
+    table = layout.itemAt(1).widget()
+
+    assert isinstance(button, QPushButton)
+    assert isinstance(table, QTableWidget)
+    assert table.rowCount() == 2
+    assert table.columnCount() == 2
+
+    assert table.editTriggers() == QTableWidget.EditTrigger.NoEditTriggers
+
+    assert table.item(0, 0).text() == "1"
+    assert table.item(0, 1).text() == "Товар А"
+
+
+def test_create_db_viewer_button_click(monkeypatch, qtbot):
+    """Проверяем, что клик по кнопке закрытия вызывает функцию close_db_viewer."""
+    mock_obj = MagicMock()
+    test_df = pd.DataFrame({"col": [1]})
+    monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: test_df)
+
+    with patch("src.services.close_db_viewer") as mock_close:
+        viewer = create_db_viewer("dummy.db", "products", mock_obj)
+        qtbot.addWidget(viewer)
+
+        # Находим кнопку в макете и эмулируем клик пользователя
+        button = viewer.layout().itemAt(0).widget()
+        button.click()
+
+        mock_close.assert_called_once_with(mock_obj)
+
+
+def test_create_db_viewer_exception_handling(monkeypatch, qtbot):
+    """Проверяем перехват критических исключений при падении запроса к БД."""
+    mock_obj = MagicMock()
+    mock_obj.result_display = MagicMock()
+
+    # Имитируем жесткое падение библиотеки pandas/sqlite3
+    def mock_crash(*args, **kwargs):
+        raise sqlite3.DatabaseError("Database file is encrypted or corrupted")
+
+    monkeypatch.setattr(pd, "read_sql_query", mock_crash)
+
+    # Вызываем функцию
+    viewer = create_db_viewer("dummy.db", "products", mock_obj)
+
+    # Так как viewer вернет None при исключении, регистрировать его в qtbot не нужно
+    assert viewer is None
+    mock_obj.result_display.append.assert_called_once_with(
+        "❌ Ошибка при создании viewer: Database file is encrypted or corrupted"
+    )

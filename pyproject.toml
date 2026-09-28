@@ -3,7 +3,7 @@ name = "viewhub"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Mikhail Burdukovsky",email = "burmspb@gmail.com"}
+    {name = "Mikhail Burdukovsky", email = "burmspb@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,10 +39,9 @@ dev = [
 ]
 
 [tool.ruff]
-# Минимально необходимая версия Ruff (хорошая практика для фиксации окружения)
 required-version = ">=0.5.0"
 
-# Список исключений: папки окружения, миграции и ваш settings.py
+# Папки, которые Ruff вообще не будет сканировать
 exclude = [
     ".git",
     ".venv",
@@ -50,14 +49,12 @@ exclude = [
     "env",
     "__pycache__",
     "**/migrations/*.py",
-    # Укажите точный путь к вашему settings.py от корня проекта:
     "config/settings.py",
 ]
 line-length = 120
 
 # Настройки линтера (анализатора кода)
 [tool.ruff.lint]
-# Стандартный набор правил для профессионального Django-проекта
 select = [
     "E",   # Ошибки стиля кода (pycodestyle errors)
     "W",   # Предупреждения стиля кода (pycodestyle warnings)
@@ -69,30 +66,34 @@ select = [
     "RUF", # Собственные полезные правила разработчиков Ruff
 ]
 
-# Правила, которые мы сознательно отключаем (если нужно)
 ignore = [
-    "S101",   # Разрешаем использовать assert в тестах
+    "S101",   # Разрешаем использовать assert глобально
     "RUF001", # Игнорировать русскую раскладку в самом коде
     "RUF002", # Игнорировать русскую раскладку в докстрингах
     "RUF003", # Игнорировать русскую раскладку в комментариях (#)
     "I001",   # Игнорировать проблемы с неразрешёнными импортами (для PyQt6)
 ]
 
+# ЖЕЛЕЗОБЕТОННЫЙ ФИЛЬТР ДЛЯ ТЕСТОВ: Ruff закроет глаза на все специфичные правила в папке tests
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S105",    # Игнорировать предупреждения о "зашитых токенах" (auth_token = "token")
+    "S106",    # Игнорировать зашитые пароли в аргументах функций в тестах
+    "SLF001",  # Разрешаем приватные вызовы и импорты (_handler, _update_status)
+    "PLR2004", # Разрешаем "магические числа" в ассертах тестов (например, assert len(df) == 2)
+]
+
 [tool.ruff.format]
 quote-style = "double"
 
-# Настройки для автоматической сортировки импортов (секция I)
 [tool.ruff.lint.isort]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
-# Укажите через запятую имена всех ваших Django-приложений в проекте:
-# known-first-party = ["routines", "users"]
 
 [tool.pytest.ini_options]
 pythonpath = [
     ".",               # Корневая папка (чтобы находил parsers_config)
     "src"              # Папка исходников (чтобы импорты внутри src работали напрямую)
 ]
-
 filterwarnings = [
     "ignore:unclosed database:ResourceWarning"
 ]
