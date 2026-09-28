@@ -90,6 +90,25 @@ BACK_BUTTON_STYLE = """
     }
 """
 
+# Стиль кнопки "Экспорт" (с заливкой)
+EXPORT_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #334155; /* Slate 700 */
+        color: #f8fafc;            /* Slate 50 */
+        border: 1px solid #475569; /* Slate 600 */
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background-color: #475569; /* Slate 600 */
+        border-color: #64748b;     /* Slate 500 */
+    }
+    QPushButton:pressed {
+        background-color: #1e293b; /* Slate 800 */
+    }
+"""
+
 # Стиль компактной кнопки "Показать" пароль
 TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;" # noqa: S105
 

@@ -1,3 +1,5 @@
+"""Тест создания таблиц в БД."""
+
 import sqlite3
 import os
 

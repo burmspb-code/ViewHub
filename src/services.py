@@ -2,10 +2,14 @@
 
 import json
 import logging
+import sqlite3
+
+import pandas as pd
 from contextlib import suppress
 
 import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 from PyQt6.QtCore import QThread
+from PyQt6.QtWidgets import QFileDialog
 
 from scaners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
@@ -226,9 +230,17 @@ def parsing_on_click(obj) -> None:
             obj.target_url_input.setStyleSheet("border: 1px solid #ef4444;")
         return
 
+    if not keyword:
+        with suppress(Exception):
+            obj.key_word_input.setStyleSheet("border: 1px solid #ef4444;")
+        return
+
     # Сбрасываем красную рамку, если ссылка введена
     with suppress(Exception):
         obj.target_url_input.setStyleSheet("")
+
+    with suppress(Exception):
+        obj.key_word_input.setStyleSheet("")
 
     # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
     if hasattr(obj, "btn_send_scanning"):
@@ -242,15 +254,22 @@ def parsing_on_click(obj) -> None:
 
     # ================ Конфигурируем парсер под конкретную задачу ========================
 
-    config = GoldenAppleConfig(target_url, keyword, "golden_apple.xlsx")
+    config = GoldenAppleConfig(target_url, keyword)
     extractor = GoldenAppleExtractor(config)
 
     saver = SQLiteSaver()  # db_path подхватится из DBConfig: data/viewhub.db
+    parser = None  # Инициализируем для использования после try-except
 
     try:
         # Создаём таблицу и привязываем конфиг + session_id к сейверу
         table_name = saver.init_for_config(config)
         logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {saver.db_path}")
+
+        # Парсер создаем только если БД успешно инициализирована
+        parser = GoldenAppleParser(config=config, extractor=extractor, saver=saver)
+
+        # Сохраняем парсер в объекте окна для использования в экспорте
+        obj.parser = parser
 
     except Exception as e:
         # Критическая ошибка инициализации БД: дальше запускать парсер нельзя
@@ -259,21 +278,18 @@ def parsing_on_click(obj) -> None:
         # Прерываем выполнение этого блока (в зависимости от твоей архитектуры, здесь может быть return или raise)
         raise RuntimeError("Не удалось подготовить базу данных. Парсинг остановлен.") from e
 
-    # Парсер создаем только если БД успешно инициализирована
-    parser = GoldenAppleParser(config=config, extractor=extractor, saver=saver)
-
     # ====================================================================================
 
-    # 1. Сначала создаем чистый системный поток QThread
+    # Сначала создаем чистый системный поток QThread
     obj.parser_thread = QThread()
 
-    # 2. Затем создаем рабочий объект (Воркер) и передаем ему парсер
+    # Затем создаем рабочий объект (Воркер) и передаем ему парсер
     obj.parser_worker = ParserWorker(parser=parser)
 
-    # 3. Прикрепляем сигнал к парсеру
+    # Прикрепляем сигнал к парсеру
     parser.progress_callback = obj.parser_worker.progress_signal.emit
 
-    # 4. Перемещаем воркер в фоновый поток
+    # Перемещаем воркер в фоновый поток
     obj.parser_worker.moveToThread(obj.parser_thread)
 
     # Связываем запуск потока с выполнением метода run() воркера
@@ -311,10 +327,143 @@ def parsing_cancel_on_click(obj) -> None:
             obj.btn_cancel_parsing.setEnabled(False)
 
         # Поднимаем потокобезопасный флаг остановки внутри воркера.
-        if hasattr(obj, 'parser_worker'):
+        if hasattr(obj, "parser_worker"):
             obj.parser_worker.stop()
     else:
         logger.warning("Невозможно отменить парсинг: процесс не запущен или уже завершен.")
+
+
+def parsing_export_on_click(obj):
+    """Экспорт таблицы из БД."""
+    # Получаем парсер, если он был создан при запуске парсинга
+    parser = getattr(obj, "parser", None)
+    if not parser:
+        logger.warning("Ошибка экспорта. Парсер не инициализирован. Сначала запустите парсинг.")
+        return
+
+    # Формируем дефолтное имя файла
+    path_name = parsing_export_init(parser)
+
+    # Если имя нигде не зафиксировано, возврат
+    if not path_name:
+        logger.warning("Ошибка экспорта. Возможно нечего сохранять.")
+        return
+
+    # Делаем кнопку экспорта временно неактивной, чтобы избежать спам-кликов
+    if hasattr(obj, "btn_export_parsing"):
+        obj.btn_export_parsing.setEnabled(False)
+
+    try:
+        # Читаем таблицу из БД (передаем parser и obj для логов в UI)
+        table = parsing_db_read(parser, obj)
+
+        # Если таблица пустая или была ошибка чтения — прерываем экспорт
+        if table is None or table.empty:
+            return
+
+        # Открываем окно и сохраняем таблицу в файл (передаем table, path_name и obj)
+        parsing_file_save(table, path_name, obj)
+
+    finally:
+        # Разблокируем кнопку экспорта при любом исходе (даже при ошибках)
+        if hasattr(obj, "btn_export_parsing"):
+            obj.btn_export_parsing.setEnabled(True)
+
+def parsing_export_init(parser) -> str:
+    """Формируем имя файла для экспорта."""
+    # Задаем базовое имя файла на основе конфига или имени таблицы
+    base_name = getattr(parser.config, "file_name", "")
+    if not base_name:
+        base_name = getattr(parser.saver, "table_name", "")
+
+    if not base_name:
+        return ""
+
+    # Добавляем расширение по умолчанию, если его нет в имени таблицы/конфига
+    if not base_name.endswith(('.xlsx', '.csv')):
+        path_name = f"{base_name}.xlsx"
+    else:
+        path_name = base_name
+
+    return path_name
+
+def parsing_db_read(parser, obj) -> pd.DataFrame | None:
+    """Чтение таблицы из БД."""
+    try:
+        # Получаем путь к БД
+        db_path = getattr(parser.saver, "db_path", None)
+        if not db_path:
+            logger.error("Не удалось найти путь к базе данных SQLite в parser.saver!")
+            if hasattr(obj, "result_display"):
+                obj.result_display.append("❌ Ошибка: не найден файл базы данных.")
+            return None
+
+        # Получаем имя таблицы
+        table_name = getattr(parser.saver, "table_name", None)
+        if not table_name:
+            logger.warning("Не удалось найти таблицу для экспорта.")
+            if hasattr(obj, "result_display"):
+                obj.result_display.append("⚠️ Ошибка: имя таблицы не задано.")
+            return None
+
+        # Открываем соединение и читаем данные
+        conn = sqlite3.connect(db_path)
+        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)  # noqa: S608
+        conn.close()
+
+        if df.empty:
+            logger.warning("Экспорт отменен: таблица в базе данных пуста.")
+            if hasattr(obj, "result_display"):
+                obj.result_display.append("⚠️ База данных пуста, нечего экспортировать.")
+            return None
+
+        return df
+
+    except Exception as e:
+        error_msg = str(e).splitlines()[0] if str(e) else "Unknown database error"
+        logger.error(f"Ошибка при импорте из БД: {error_msg}")
+        if hasattr(obj, "result_display"):
+            obj.result_display.append(f"❌ Ошибка чтения БД: {error_msg}")
+        return None
+
+def parsing_file_save(df, path_name, obj) -> None:
+    """Сохранение данных в файл."""
+    # Открываем диалоговое окно сохранения
+    file_path, _ = QFileDialog.getSaveFileName(
+        obj, "Сохранить файл", path_name, "Excel Files (*.xlsx);;CSV Files (*.csv)"
+    )
+
+    # Если пользователь закрыл окно или нажал "Отмена"
+    if not file_path:
+        logger.info("Экспорт отменен пользователем.")
+        return
+
+    try:
+        if file_path.endswith(".xlsx"):
+            # index=False убирает системную колонку с номерами строк от pandas
+            df.to_excel(file_path, index=False, engine="openpyxl")
+        elif file_path.endswith(".csv"):
+            # utf-8-sig чтобы Excel корректно читал кириллицу в CSV
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+
+        # Если запись прошла успешно
+        logger.info(f"Данные успешно сохранены в файл: {file_path}")
+        if hasattr(obj, "result_display"):
+            obj.result_display.append(f"💾 Успешный экспорт: {file_path}")
+
+    except PermissionError:
+        # Отдельно обрабатываем частую ошибку, когда файл уже открыт в Excel
+        error_msg = "Файл занят другой программой (например, Excel). Закройте его и повторите попытку."
+        logger.error(f"Ошибка доступа к файлу: {file_path} заблокирован.")
+        if hasattr(obj, "result_display"):
+            obj.result_display.append(f"❌ Ошибка доступа: {error_msg}")
+
+    except Exception as e:
+        # Перехватываем любые другие ошибки диска (нет места, некорректные символы в пути и т.д.)
+        error_msg = str(e).splitlines()[0] if str(e) else "Unknown file write error"
+        logger.error(f"Ошибка при записи файла: {error_msg}")
+        if hasattr(obj, "result_display"):
+            obj.result_display.append(f"❌ Ошибка записи файла: {error_msg}")
 
 
 # --- Внутренние вспомогательные функции для обработки сигналов потока ---

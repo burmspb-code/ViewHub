@@ -32,6 +32,7 @@ from src.core.styles import (
     SUBMIT_BUTTON_STYLE,
     CANCEL_BUTTON_STYLE,
     TOGGLE_PWD_VISIBILITY_STYLE,
+    EXPORT_BUTTON_STYLE,
 )
 from src.services import (
     auth_on_click,
@@ -40,6 +41,7 @@ from src.services import (
     request_on_click,
     scanning_on_click,
     scanning_cancel_on_click,
+    parsing_export_on_click,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,7 @@ class MainWindow(QWidget):
         self.btn_parsing_menu = None
         self.key_word_input = None
         self.btn_cancel_parsing = None
+        self.btn_export_parsing = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -125,6 +128,9 @@ class MainWindow(QWidget):
         # Задаем токен и url для дальнейшей работы
         self.auth_token = None
         self.base_url = None
+
+        # Для экспорта данных парсинга
+        self.parser = None
 
         # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
         self.init_ui()
@@ -363,6 +369,12 @@ class MainWindow(QWidget):
         self.btn_cancel_parsing.setStyleSheet(CANCEL_BUTTON_STYLE)
         parsing_layout.addWidget(self.btn_cancel_parsing)
 
+        self.btn_export_parsing = QPushButton("Экспорт")
+        self.btn_export_parsing.setMinimumHeight(42)
+        self.btn_export_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_export_parsing.setStyleSheet(EXPORT_BUTTON_STYLE)
+        parsing_layout.addWidget(self.btn_export_parsing)
+
         parsing_layout.addStretch()
         self.stack.addWidget(self.page_parsing)
 
@@ -531,6 +543,7 @@ class MainWindow(QWidget):
         self.btn_back_parsing.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
         self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self)) # Отмена парсинга
+        self.btn_export_parsing.clicked.connect(lambda: parsing_export_on_click(self)) # Экспорт парсинга
 
         # Настройки
         self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек

@@ -1,11 +1,13 @@
+"""Тест создания БД."""
+
 import sqlite3
 from pathlib import Path
 
-# Путь к базе (такой же, как у тебя в конфиге)
+# Путь к базе
 db_path = Path("data", "viewhub_test.db")
 db_path.parent.mkdir(parents=True, exist_ok=True)
 
-# Твой идеальный SQL, который не работал
+# SQL запрос
 sql = """
 CREATE TABLE IF NOT EXISTS "goldapple_ru_parfjumerija_dlja_detej" (
     "item_id" TEXT NOT NULL,

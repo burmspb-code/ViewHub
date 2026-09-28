@@ -25,7 +25,7 @@ class DBParsingConfig:
             return Path(custom_path).expanduser().resolve()
 
         # 2. Переменная окружения
-        env_path = os.getenv("DB_PATH")
+        env_path = os.getenv("DB_PATH_PARSING")
         if env_path:
             return Path(env_path).expanduser().resolve()
 

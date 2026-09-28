@@ -1,3 +1,5 @@
+"""Тесты для работы с БД."""
+
 import sys
 import sqlite3
 from typing import ClassVar

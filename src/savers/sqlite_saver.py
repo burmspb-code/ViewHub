@@ -1,3 +1,5 @@
+"""Модуль взаимодействия с SQLite."""
+
 import re
 import logging
 import hashlib
@@ -162,10 +164,8 @@ class SQLiteSaver:
 
     def save(self, items: List[Dict[str, Any]]) -> int:
         """Сохраняет пачку товаров в SQLite с обновлением дубликатов (UPSERT).
-
         Args:
             items (List[Dict[str, Any]]): Список словарей с данными товаров.
-
         Returns:
             int: Количество успешно сохраненных или обновленных записей.
         """
@@ -175,19 +175,19 @@ class SQLiteSaver:
         from contextlib import closing
         from datetime import datetime
 
-        # 1. Получаем полную схему
+        # Получаем полную схему
         schema = self.config.get_full_schema()
         key_column = self.config.get_key_column()  # "id"
         dedup_column = getattr(self.config, "DEDUP_COLUMN", None)  # "item_id"
 
-        # 2. Формируем список колонок для вставки (исключая автоинкрементный id)
+        # Формируем список колонок для вставки (исключая автоинкрементный id)
         # Так как page_number уже в схеме, cols_to_insert соберется автоматически!
         cols_to_insert = [c for c in schema if c != key_column]
 
         placeholders = ", ".join(["?"] * len(cols_to_insert))
         cols_str = ", ".join(f'"{c}"' for c in cols_to_insert)
 
-        # 3. Настраиваем логику обновления при конфликте
+        # Настраиваем логику обновления при конфликте
         update_cols = [c for c in cols_to_insert if c not in (dedup_column, "created_at")]
         update_set = ", ".join(f'"{c}" = excluded."{c}"' for c in update_cols)
 
@@ -199,7 +199,7 @@ class SQLiteSaver:
         affected = 0
         current_time = datetime.now().isoformat()
 
-        # 4. Подготавливаем параметры (теперь тут супер-простой и быстрый цикл)
+        # Подготавливаем параметры (теперь тут супер-простой и быстрый цикл)
         params = []
         for item in items:
             row = []
@@ -212,7 +212,7 @@ class SQLiteSaver:
                     row.append(item.get(c))  # page_number заберется отсюда автоматически!
             params.append(tuple(row))
 
-        # 5. Пакетная запись в БД с блокировкой для потокобезопасности
+        # Пакетная запись в БД с блокировкой для потокобезопасности
         if params:
             with self._lock:
                 with closing(self._connect()) as conn:
