@@ -4,7 +4,7 @@ import sqlite3
 import os
 
 # Путь к базе (скопируй тот, который реально используется в проекте)
-db_path = "data/viewhub.db"
+db_path = "../data/viewhub.db"
 
 sql = """
 CREATE TABLE IF NOT EXISTS "goldapple_ru_parfjumerija_dlja_detej" (

@@ -31,7 +31,11 @@ build-backend = "poetry.core.masonry.api"
 
 [dependency-groups]
 dev = [
-    "ruff (>=0.16.6,<0.17.0)"
+    "ruff (>=0.16.6,<0.17.0)",
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-qt (>=4.5.0,<5.0.0)",
+    "pytest-mock (>=3.16.0,<4.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)"
 ]
 
 [tool.ruff]
@@ -82,3 +86,13 @@ quote-style = "double"
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 # Укажите через запятую имена всех ваших Django-приложений в проекте:
 # known-first-party = ["routines", "users"]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".",               # Корневая папка (чтобы находил parsers_config)
+    "src"              # Папка исходников (чтобы импорты внутри src работали напрямую)
+]
+
+filterwarnings = [
+    "ignore:unclosed database:ResourceWarning"
+]

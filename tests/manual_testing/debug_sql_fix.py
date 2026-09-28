@@ -4,7 +4,7 @@ import sqlite3
 import os
 
 # Путь к базе данных
-db_path = "data/viewhub_fixed.db"
+db_path = "../data/viewhub_fixed.db"
 os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
 # ИСПРАВЛЕННЫЙ SQL: PRIMARY KEY перенесен в самый конец, после всех колонок!

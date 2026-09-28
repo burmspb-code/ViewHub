@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 # Путь к базе
-db_path = Path("data", "viewhub_test.db")
+db_path = Path("../data", "viewhub_test.db")
 db_path.parent.mkdir(parents=True, exist_ok=True)
 
 # SQL запрос

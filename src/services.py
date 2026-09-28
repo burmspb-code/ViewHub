@@ -406,10 +406,14 @@ def parsing_db_read(parser, obj) -> pd.DataFrame | None:
                 obj.result_display.append("⚠️ Ошибка: имя таблицы не задано.")
             return None
 
-        # Открываем соединение и читаем данные
+        # Читаем данные через pandas с явным управлением соединением
         conn = sqlite3.connect(db_path)
-        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)  # noqa: S608
-        conn.close()
+        try:
+            df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)  # noqa: S608
+        finally:
+            conn.close()
+            # Удаляем ссылку для гарантии освобождения ресурсов
+            del conn
 
         if df.empty:
             logger.warning("Экспорт отменен: таблица в базе данных пуста.")
