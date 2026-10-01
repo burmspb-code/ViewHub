@@ -35,7 +35,9 @@ dev = [
     "pytest (>=9.1.1,<10.0.0)",
     "pytest-qt (>=4.5.0,<5.0.0)",
     "pytest-mock (>=3.16.0,<4.0.0)",
-    "pytest-cov (>=7.1.0,<8.0.0)"
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "tinycss2 (>=1.5.1,<2.0.0)",
+    "requests-mock (>=1.12.1,<2.0.0)"
 ]
 
 [tool.ruff]
@@ -96,4 +98,24 @@ pythonpath = [
 ]
 filterwarnings = [
     "ignore:unclosed database:ResourceWarning"
+]
+
+[tool.coverage.run]
+omit = [
+    "src/parsers_config/citadel_config.py",
+    "src/parsers_config/gardarika_config.py",
+    "src/scanners/async_scan_ep.py",
+    "src/scanners/auto_blind_fuzzer.py",
+    "src/scanners/scaner_api.py",
+    "src/scanners/scanner_new_v3.6.py"
+]
+
+[tool.coverage.report]
+# Указываем регулярные выражения для строк, которые не нужно учитывать
+exclude_also = [
+    "def __repr__",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    '\\s*@abstractmethod',      # Игнорировать декоратор @abstractmethod
+    '\\s*@abc.abstractmethod',  # Игнорировать декоратор @abc.abstractmethod
 ]

@@ -4,7 +4,7 @@ import sys
 import sqlite3
 from typing import ClassVar
 from pathlib import Path
-from src.savers.sqlite_saver import SQLiteSaver
+from src.database.sqlite_manager import DatabaseManager
 from core.base_classes import BaseDBParsingConfig
 
 # Настройка пути для импортов
@@ -43,25 +43,25 @@ class MockConfig(BaseDBParsingConfig):
         return {**cls.SYSTEM_COLUMNS, **MockConfig.COLUMNS}
 
 
-def test_sqlite_saver_full_flow():
-    print("🚀 Запуск теста SQLiteSaver...")
+def test_sqlite_manager_full_flow():
+    print("🚀 Запуск теста DatabaseManager...")
 
     target_url = "https://test.site.com/products"
     keyword = "mock_test"
 
-    saver = SQLiteSaver()
+    manager = DatabaseManager()
 
     # Инициализация: создаст БД, таблицу и проверит схему
     config = MockConfig(target_url, keyword)
-    table_name = saver.init_for_config(config)
+    table_name = manager.init_for_config(config)
     print(f"✅ Таблица готова: {table_name}")
 
-    db_path = saver.db_path
+    db_path = manager.db_path
     assert db_path.exists(), f"❌ Файл базы данных не создан: {db_path}"
     print(f"✅ Файл БД найден: {db_path}")
 
     # Запоминаем session_id, который Сейвер сгенерировал автоматически при инициализации
-    test_session_id = saver.session_id
+    test_session_id = manager.session_id
 
     # Тестовые данные (приводим типы к SQLite: in_stock = 1 / 0)
     test_data = [
@@ -74,7 +74,7 @@ def test_sqlite_saver_full_flow():
         item["page_number"] = 1
 
     # Вызываем save без page_number. Метод возвращает количество записанных строк (int)
-    result = saver.save(test_data)
+    result = manager.save(test_data)
     assert result == 2, f"❌ Ошибка сохранения. Ожидалось 2 строки, записано: {result}"
     print("✅ Данные успешно сохранены")
 
@@ -86,7 +86,7 @@ def test_sqlite_saver_full_flow():
         item["page_number"] = 2
 
     # Вызываем save без page_number. UPSERT должен успешно обновить 1 строку
-    result_update = saver.save(updated_data)
+    result_update = manager.save(updated_data)
     assert result_update == 1, f"❌ Ошибка обновления. Ожидалась 1 строка, записано: {result_update}"
     print("✅ Дубликат успешно обновлен (UPSERT сработал)")
 
@@ -143,4 +143,4 @@ def test_sqlite_saver_full_flow():
 
 
 if __name__ == "__main__":
-    test_sqlite_saver_full_flow()
+    test_sqlite_manager_full_flow()

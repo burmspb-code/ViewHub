@@ -36,7 +36,7 @@ def test_parsing_export_init_with_config_name():
     # Создаем фальшивый парсер с нужной структурой атрибутов
     mock_parser = MagicMock()
     mock_parser.config.file_name = "golden_apple_data"
-    mock_parser.saver.table_name = "some_table"
+    mock_parser.manager.table_name = "some_table"
 
     # Вызываем тестируемую функцию
     result = parsing_export_init(mock_parser)
@@ -56,10 +56,10 @@ def test_parsing_export_init_with_existing_extension():
 
 
 def test_parsing_export_init_fallback_to_table_name():
-    """Проверяем, что если в конфиге пусто, имя берется из таблицы saver."""
+    """Проверяем, что если в конфиге пусто, имя берется из таблицы manager."""
     mock_parser = MagicMock()
     mock_parser.config.file_name = ""  # В конфиге пусто
-    mock_parser.saver.table_name = "goods_table"
+    mock_parser.manager.table_name = "goods_table"
 
     result = parsing_export_init(mock_parser)
 
@@ -94,8 +94,8 @@ def setup_temporary_db(tmp_path):
 def test_parsing_db_read_success(setup_temporary_db):
     """Проверяем успешное чтение таблицы из БД в DataFrame."""
     mock_parser = MagicMock()
-    mock_parser.saver.db_path = setup_temporary_db
-    mock_parser.saver.table_name = "products"
+    mock_parser.manager.db_path = setup_temporary_db
+    mock_parser.manager.table_name = "products"
     mock_obj = MagicMock()
 
     df = parsing_db_read(mock_parser, mock_obj)
@@ -122,8 +122,8 @@ def test_parsing_db_read_empty_table(setup_temporary_db):
         conn.close()
 
     mock_parser = MagicMock()
-    mock_parser.saver.db_path = setup_temporary_db
-    mock_parser.saver.table_name = "products"
+    mock_parser.manager.db_path = setup_temporary_db
+    mock_parser.manager.table_name = "products"
 
     mock_obj = MagicMock()
     mock_obj.result_display = MagicMock()
@@ -208,8 +208,8 @@ def test_parsing_db_read_missing_db_path():
     """Проверяем поведение функции, если в парсере отсутствует путь к БД."""
     # Создаем мок-парсер, у которого db_path возвращает None или пустую строку
     mock_parser = MagicMock()
-    mock_parser.saver.db_path = None
-    mock_parser.saver.table_name = "products"
+    mock_parser.manager.db_path = None
+    mock_parser.manager.table_name = "products"
 
     # Мокаем UI
     mock_obj = MagicMock()
@@ -229,8 +229,8 @@ def test_parsing_db_read_missing_db_path():
 def test_parsing_db_read_missing_table_name():
     """Проверяем поведение функции, если в парсере отсутствует имя таблицы."""
     mock_parser = MagicMock()
-    mock_parser.saver.db_path = "valid_path.db"
-    mock_parser.saver.table_name = None  # Имя таблицы не задано
+    mock_parser.manager.db_path = "valid_path.db"
+    mock_parser.manager.table_name = None  # Имя таблицы не задано
 
     mock_obj = MagicMock()
     mock_obj.result_display = MagicMock()
@@ -247,8 +247,8 @@ def test_parsing_db_read_missing_table_name():
 def test_parsing_db_read_exception_handling(setup_temporary_db, monkeypatch):
     """Проверяем перехват исключений и вывод ошибки в UI при сбое чтения БД."""
     mock_parser = MagicMock()
-    mock_parser.saver.db_path = setup_temporary_db
-    mock_parser.saver.table_name = "products"
+    mock_parser.manager.db_path = setup_temporary_db
+    mock_parser.manager.table_name = "products"
 
     mock_obj = MagicMock()
     mock_obj.result_display = MagicMock()
@@ -489,7 +489,7 @@ def test_auth_on_click_success():
         mock_obj.result_display.append.assert_any_call("Статус: Авторизован.\nТокен: JWT_TOKEN_XYZ_123")
 
         # Проверяем, что токен и адрес прописались в контекст главного окна
-        assert mock_obj.auth_token == "JWT_TOKEN_XYZ_123" # noqa: S105
+        assert mock_obj.auth_token == "JWT_TOKEN_XYZ_123"
         assert mock_obj.base_url == "https://site.com"
 
 
@@ -555,7 +555,7 @@ def test_request_on_click_missing_endpoint():
     mock_obj = MagicMock()
     # Пользователь авторизован
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "valid_token_123" # noqa: S105
+    mock_obj.auth_token = "valid_token_123"
     # Но эндпоинт пустой (с пробелами для проверки strip)
     mock_obj.api_request_url_input.text.return_value = "   "
     mock_obj.result_display = MagicMock()
@@ -571,7 +571,7 @@ def test_request_on_click_success_200():
     """Проверяем успешный GET-запрос и вывод форматированного JSON."""
     mock_obj = MagicMock()
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "secret_jwt_token" # noqa: S105
+    mock_obj.auth_token = "secret_jwt_token"
     mock_obj.api_request_url_input.text.return_value = "https://site.com/v1/tasks/"
     mock_obj.result_display = MagicMock()
 
@@ -611,7 +611,7 @@ def test_request_on_click_server_error():
     """Проверяем обработку некорректных статус-кодов (например, 500 Internal Error)."""
     mock_obj = MagicMock()
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "token" # noqa: S105
+    mock_obj.auth_token = "token"
     mock_obj.api_request_url_input.text.return_value = "https://site.com/error/"
     mock_obj.result_display = MagicMock()
 
@@ -635,7 +635,7 @@ def test_request_on_click_network_exception():
     """Проверяем перехват исключений httpx при критическом сбое сети."""
     mock_obj = MagicMock()
     mock_obj.base_url = "https://site.com"
-    mock_obj.auth_token = "token" # noqa: S105
+    mock_obj.auth_token = "token"
     mock_obj.api_request_url_input.text.return_value = "https://site.com/timeout/"
     mock_obj.result_display = MagicMock()
 
@@ -683,7 +683,7 @@ def test_scanning_on_click_success_thread_start():
     with (
         patch("src.services.AsyncScanEndpoint"),
         patch("src.services.QThread", return_value=mock_thread),
-        patch("src.services.ScanerWorker", return_value=mock_worker),
+        patch("src.services.ScannerWorker", return_value=mock_worker),
     ):
         scanning_on_click(mock_obj)
 
@@ -908,14 +908,14 @@ def test_parsing_on_click_db_initialization_error():
     mock_obj.target_url_input.text.return_value = "https://goldapple.ru"
     mock_obj.key_word_input.text.return_value = "крем"
 
-    # Имитируем падение метода init_for_config в SQLiteSaver
-    mock_saver = MagicMock()
-    mock_saver.init_for_config.side_effect = Exception("Disk I/O Error")
+    # Имитируем падение метода init_for_config в DatabaseManager
+    mock_manager = MagicMock()
+    mock_manager.init_for_config.side_effect = Exception("Disk I/O Error")
 
     with (
         patch("src.services.GoldenAppleConfig"),
         patch("src.services.GoldenAppleExtractor"),
-        patch("src.services.SQLiteSaver", return_value=mock_saver),
+        patch("src.services.DatabaseManager", return_value=mock_manager),
         patch("src.services.QThread") as mock_thread_class,
     ):
         # Функция должна выбросить RuntimeError, защищая от запуска с битой БД
@@ -944,7 +944,7 @@ def test_parsing_on_click_success_thread_start():
     with (
         patch("src.services.GoldenAppleConfig"),
         patch("src.services.GoldenAppleExtractor"),
-        patch("src.services.SQLiteSaver"),
+        patch("src.services.DatabaseManager"),
         patch("src.services.GoldenAppleParser", return_value=mock_parser),
         patch("src.services.QThread", return_value=mock_thread),
         patch("src.services.ParserWorker", return_value=mock_worker),
@@ -1017,8 +1017,8 @@ def test_parsing_preview_on_click_missing_db_or_table():
     """Проверяем прерывание, если в парсере нет пути к БД или имени таблицы."""
     mock_obj = MagicMock()
     mock_obj.db_viewer = None
-    mock_obj.parser.saver.db_path = None  # Путь пустой
-    mock_obj.parser.saver.table_name = "products"
+    mock_obj.parser.manager.db_path = None  # Путь пустой
+    mock_obj.parser.manager.table_name = "products"
 
     with patch("src.services.logger") as mock_logger:
         parsing_preview_on_click(mock_obj)
@@ -1030,8 +1030,8 @@ def test_parsing_preview_on_click_success_mount():
     """Проверяем успешное создание viewer, скрытие логов и монтирование в интерфейс."""
     mock_obj = MagicMock()
     mock_obj.db_viewer = None
-    mock_obj.parser.saver.db_path = "data/viewhub.db"
-    mock_obj.parser.saver.table_name = "golden_apple"
+    mock_obj.parser.manager.db_path = "storage/viewhub_parsing.db"
+    mock_obj.parser.manager.table_name = "golden_apple"
 
     mock_obj.btn_preview_parsing = MagicMock()
     mock_obj.result_display = MagicMock()
@@ -1047,7 +1047,7 @@ def test_parsing_preview_on_click_success_mount():
         parsing_preview_on_click(mock_obj)
 
         # 1. Проверяем, что конструктор viewer вызвался с правильными параметрами
-        mock_create.assert_called_once_with("data/viewhub.db", "golden_apple", mock_obj)
+        mock_create.assert_called_once_with("storage/viewhub_parsing.db", "golden_apple", mock_obj)
 
         # 2. Кнопка предпросмотра заблокировалась, и ссылка на виджет сохранилась в obj
         mock_obj.btn_preview_parsing.setEnabled.assert_any_call(False)
@@ -1068,8 +1068,8 @@ def test_parsing_preview_on_click_finally_fallback_unblock():
     """Проверяем, что если viewer не создался (вернул None), кнопка разблокируется."""
     mock_obj = MagicMock()
     mock_obj.db_viewer = None
-    mock_obj.parser.saver.db_path = "data/viewhub.db"
-    mock_obj.parser.saver.table_name = "golden_apple"
+    mock_obj.parser.manager.db_path = "data/viewhub.db"
+    mock_obj.parser.manager.table_name = "golden_apple"
     mock_obj.btn_preview_parsing = MagicMock()
 
     # Имитируем, что функция создания виджета вернула None (например, сбой SQLite)
@@ -1132,22 +1132,25 @@ def test_close_db_viewer_already_closed():
     mock_obj.result_display.show.assert_not_called()
     mock_obj.btn_preview_parsing.setEnabled.assert_not_called()
 
-def test_create_db_viewer_empty_table(monkeypatch, qtbot):
+def test_create_db_viewer_empty_table(monkeypatch, qtbot, tmp_path):
     """Проверяем, что если таблица в БД пуста, функция возвращает None и пишет в UI."""
     mock_obj = MagicMock()
     mock_obj.result_display = MagicMock()
 
+    # Создаем путь во временной папке pytest (он удалится автоматически)
+    temp_db_file = str(tmp_path / "test_products.db")
+
     # Имитируем возврат пустого DataFrame из pandas
     monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: pd.DataFrame())
 
-    # Вызываем функцию (передавая qtbot, чтобы инициализировать контекст Qt)
-    viewer = create_db_viewer("dummy.db", "products", mock_obj)
+    # Передаем временный путь
+    viewer = create_db_viewer(temp_db_file, "products", mock_obj)
 
     assert viewer is None
     mock_obj.result_display.append.assert_called_once_with("⚠️ Таблица пуста")
 
 
-def test_create_db_viewer_success(monkeypatch, qtbot):
+def test_create_db_viewer_success(monkeypatch, qtbot, tmp_path):
     """Проверяем успешную сборку виджета, таблицы и заполнение её ячеек данными."""
     mock_obj = MagicMock()
 
@@ -1156,10 +1159,14 @@ def test_create_db_viewer_success(monkeypatch, qtbot):
         "ID": [1,2],
         "Название": ["Товар А", "Товар Б"]
     })
+
+    # Создаем путь во временной папке pytest (он удалится автоматически)
+    temp_db_file = str(tmp_path / "test_products.db")
+
     monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: test_df)
 
     # Вызываем функцию
-    viewer = create_db_viewer("dummy.db", "products", mock_obj)
+    viewer = create_db_viewer(temp_db_file, "products", mock_obj)
 
     # РЕШЕНИЕ: Регистрируем виджет в контексте qtbot, чтобы избежать ошибки 0xC0000409
     qtbot.addWidget(viewer)
@@ -1186,14 +1193,15 @@ def test_create_db_viewer_success(monkeypatch, qtbot):
     assert table.item(0, 1).text() == "Товар А"
 
 
-def test_create_db_viewer_button_click(monkeypatch, qtbot):
+def test_create_db_viewer_button_click(monkeypatch, qtbot, tmp_path):
     """Проверяем, что клик по кнопке закрытия вызывает функцию close_db_viewer."""
     mock_obj = MagicMock()
     test_df = pd.DataFrame({"col": [1]})
+    temp_db_file = str(tmp_path / "test_products.db")
     monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: test_df)
 
     with patch("src.services.close_db_viewer") as mock_close:
-        viewer = create_db_viewer("dummy.db", "products", mock_obj)
+        viewer = create_db_viewer(temp_db_file, "products", mock_obj)
         qtbot.addWidget(viewer)
 
         # Находим кнопку в макете и эмулируем клик пользователя
@@ -1203,10 +1211,11 @@ def test_create_db_viewer_button_click(monkeypatch, qtbot):
         mock_close.assert_called_once_with(mock_obj)
 
 
-def test_create_db_viewer_exception_handling(monkeypatch, qtbot):
+def test_create_db_viewer_exception_handling(monkeypatch, qtbot, tmp_path):
     """Проверяем перехват критических исключений при падении запроса к БД."""
     mock_obj = MagicMock()
     mock_obj.result_display = MagicMock()
+    temp_db_file = str(tmp_path / "test_products.db")
 
     # Имитируем жесткое падение библиотеки pandas/sqlite3
     def mock_crash(*args, **kwargs):
@@ -1215,7 +1224,7 @@ def test_create_db_viewer_exception_handling(monkeypatch, qtbot):
     monkeypatch.setattr(pd, "read_sql_query", mock_crash)
 
     # Вызываем функцию
-    viewer = create_db_viewer("dummy.db", "products", mock_obj)
+    viewer = create_db_viewer(temp_db_file, "products", mock_obj)
 
     # Так как viewer вернет None при исключении, регистрировать его в qtbot не нужно
     assert viewer is None

@@ -41,10 +41,10 @@ def login_to_django(url: str, username: str, password: str) -> dict:
                     "message": "Авторизация успешно пройдена.",
                     "token": token
                 }
-            except Exception:
+            except Exception as e:
                 return {
                     "success": True,
-                    "message": "Успешный вход, но ответ сервера не в JSON.",
+                    "message": f"Успешный вход, но ответ сервера не в JSON: {e}",
                     "token": None
                 }
 

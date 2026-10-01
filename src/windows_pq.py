@@ -176,7 +176,7 @@ class MainWindow(QWidget):
         menu_layout.setContentsMargins(0, 0, 0, 0)
         menu_layout.setSpacing(12)
 
-        lbl_title = QLabel("МЕНЮ ДЕЙСТВИЙ")
+        lbl_title = QLabel("МЕНЮ")
         lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #94a3b8; letter-spacing: 1px;")
         menu_layout.addWidget(lbl_title)
 
@@ -190,12 +190,12 @@ class MainWindow(QWidget):
         self.btn_request_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_request_menu)
 
-        self.btn_scanning_menu = QPushButton("📡  СКАНИРОВАНИЕ")
+        self.btn_scanning_menu = QPushButton("💀  СКАНИРОВАНИЕ")
         self.btn_scanning_menu.setMinimumHeight(45)
         self.btn_scanning_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_scanning_menu)
 
-        self.btn_parsing_menu = QPushButton("🤖  ПАРСИНГ")
+        self.btn_parsing_menu = QPushButton("👽 ПАРСИНГ")
         self.btn_parsing_menu.setMinimumHeight(45)
         self.btn_parsing_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_parsing_menu)
@@ -374,16 +374,18 @@ class MainWindow(QWidget):
         self.btn_cancel_parsing.setEnabled(False)  # Отключена по умолчанию
         parsing_layout.addWidget(self.btn_cancel_parsing)
 
-        self.btn_preview_parsing = QPushButton("Просмотр")
+        self.btn_preview_parsing = QPushButton("ПРОСМОТР")
         self.btn_preview_parsing.setMinimumHeight(42)
         self.btn_preview_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_preview_parsing.setStyleSheet(PREVIEW_BUTTON_STYLE)
+        self.btn_preview_parsing.setEnabled(False)  # Отключена по умолчанию
         parsing_layout.addWidget(self.btn_preview_parsing)
 
-        self.btn_export_parsing = QPushButton("Экспорт")
+        self.btn_export_parsing = QPushButton("ЭКСПОРТ")
         self.btn_export_parsing.setMinimumHeight(42)
         self.btn_export_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_export_parsing.setStyleSheet(EXPORT_BUTTON_STYLE)
+        self.btn_export_parsing.setEnabled(False)  # Отключена по умолчанию
         parsing_layout.addWidget(self.btn_export_parsing)
 
         parsing_layout.addStretch()
@@ -436,12 +438,12 @@ class MainWindow(QWidget):
         z2_layout = QVBoxLayout(self.zone2)
         z2_layout.setContentsMargins(15, 15, 15, 15)
 
-        lbl_data_title = QLabel("<b>📋 ПАНЕЛЬ ВЫВОДА ДАННЫХ</b>")
+        lbl_data_title = QLabel("<b>📋 ВЫВОД ДАННЫХ</b>")
         lbl_data_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
         z2_layout.addWidget(lbl_data_title)
 
         self.result_display = QTextEdit()
-        self.result_display.setPlaceholderText("Здесь будут отображаться структурированные ответы от Django API...")
+        self.result_display.setPlaceholderText("Здесь будет отображаться текущая справочная информация...")
         z2_layout.addWidget(self.result_display)
 
         top_splitter.addWidget(self.zone1)
@@ -459,7 +461,7 @@ class MainWindow(QWidget):
         z3_layout = QVBoxLayout(self.zone3)
         z3_layout.setContentsMargins(15, 15, 15, 15)
 
-        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ (ЛОГИ)</b>")
+        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ</b>")
         lbl_log_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
         z3_layout.addWidget(lbl_log_title)
 

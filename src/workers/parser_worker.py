@@ -1,12 +1,12 @@
 """Базовый класс для потоков парсинга."""
 
 import logging
-import threading  # ИСПРАВЛЕНО: Добавлен обязательный импорт
+import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from exceptions import ExceptionStopParser
-from core.base_classes import BaseParser, BaseSaver
+from my_exceptions.exceptions import ExceptionStopParser
+from core.base_classes import BaseParser, BaseDataBase
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class ParserWorker(QObject):
         self.parser: BaseParser = parser
         # Используем потокобезопасный Event вместо обычного bool
         self._stop_event = threading.Event()
-        self.saver: BaseSaver = parser.saver
+        self.manager: BaseDataBase = parser.manager
         if hasattr(parser, "config"):
             self.file_name: str = parser.config.file_name
         else:
@@ -50,8 +50,8 @@ class ParserWorker(QObject):
                 total_items_count += len(data_chunk)
 
                 # Переносим сохранения в логику парсера
-                # if self.saver:
-                #     self.saver.save(data_chunk)
+                # if self.manager:
+                #     self.manager.save(data_chunk)
 
                 # Отправляем данные в интерфейс
                 self.progress_signal.emit(
@@ -73,7 +73,7 @@ class ParserWorker(QObject):
 
         except Exception as e:
             error_text = str(e)
-            logger.exception("❌ Критическая ошибка: %s", error_text)
+            logger.exception("Критическая ошибка: %s", error_text)
 
             # Безопасное извлечение первой строки (без падения на пустых Exception)
             lines = error_text.splitlines()

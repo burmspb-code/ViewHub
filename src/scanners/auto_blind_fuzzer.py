@@ -35,7 +35,7 @@ ADMIN_PATH = "/admin/"
 def extract_api_hints(html_text):
     """Ищет скрытые текстовые зацепки и пути в HTML-разметке сайта."""
     hints = set()
-    raw_paths = re.findall(r'(?:href|src|data-url|action)=["\']([^"\']+)["\']', html_text)
+    raw_paths = re.findall(r'(?:href|src|storage-url|action)=["\']([^"\']+)["\']', html_text)
     for path in raw_paths:
         if any(marker in path for marker in [API_PATH_MARKER, "/v1/", "/v2/", "/auth/", "/login", "/admin", "/users"]):
             # Забираем только чистую строку пути до знака вопроса

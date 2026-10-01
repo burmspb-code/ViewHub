@@ -12,15 +12,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core.base_classes import BaseDBParsingConfig
-from core.db_config import DBParsingConfig
+from core.base_classes import BaseDBParsingConfig, BaseDataBase
+from database.db_config import DBParsingConfig
 
 
 logger = logging.getLogger(__name__)
 
 
-class SQLiteSaver:
-    """Класс для сохранения данных в SQLite. На вход получаем путь к базе данных для записи."""
+class DatabaseManager(BaseDataBase):
+    """Класс для взаимодействия с SQLite."""
 
     # Для SQLite лимит огромный (1 млн), но если мы хотим держать имена аккуратными
     # или совместимыми с PostgreSQL, оставляем 63 СИМВОЛА.
@@ -72,7 +72,7 @@ class SQLiteSaver:
         # Получаем полную схему (в ней уже есть id, created_at, session_id и бизнес-поля)
         schema = config.get_full_schema()
         if not isinstance(schema, dict):
-            raise TypeError(f"Схема должна быть словарем, получено: {type(schema)}")
+            raise TypeError(f"Схема должна быть словарем, получено: {type(schema).__name}")
 
         # Собираем ограничения таблицы (constraints)
         raw_constraints = getattr(config, "TABLE_CONSTRAINTS", ()) or ()
@@ -124,7 +124,6 @@ class SQLiteSaver:
 
         # Отладка: что реально идет в SQL
         schema = config.get_full_schema()
-        logger.debug(f"🔍 DEBUG: Таблица '{table_name}', Тип схемы: {type(schema).__name__}")
 
         if not isinstance(schema, dict):
             raise TypeError(f"Схема должна быть словарем, получено: {type(schema).__name__}")
@@ -141,10 +140,10 @@ class SQLiteSaver:
                 conn.execute(create_sql)
                 conn.commit()
             except Exception as e:
-                logger.error(f"❌ Ошибка БД: {e}")
+                logger.error(f"Ошибка БД: {e}")
                 raise
 
-        logger.info(f"✅ Таблица '{table_name}' успешно создана.")
+        logger.info(f"Таблица '{table_name}' успешно создана.")
         return table_name
 
     def init_for_config(self, config: BaseDBParsingConfig) -> str:

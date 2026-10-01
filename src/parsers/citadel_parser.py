@@ -5,7 +5,7 @@ from typing import Any, Dict, Generator, List
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
-from exceptions import ExceptionStopParser
+from my_exceptions.exceptions import ExceptionStopParser
 from core.base_classes import BaseParser
 
 

@@ -7,14 +7,14 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
-from core.base_classes import BaseScaner
+from core.base_classes import BaseScanner
 
 logger = logging.getLogger(__name__)
 
 DEBUG_MODE = True
 
 
-class AsyncScanEndpoint(BaseScaner):
+class AsyncScanEndpoint(BaseScanner):
     """
     Асинхронный сканер эндпоинтов.
     """

@@ -12,8 +12,8 @@ from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
 
 from core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
-from src.savers.sqlite_saver import SQLiteSaver
-from exceptions import ExceptionStopParser
+from src.database.sqlite_manager import DatabaseManager
+from my_exceptions.exceptions import ExceptionStopParser
 
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 class GoldenAppleParser(BaseParser):
     """Парсинг Сайта Golden Apple."""
 
-    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, saver: SQLiteSaver):
-        super().__init__(config, extractor, saver)
+    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, manager: DatabaseManager):
+        super().__init__(config, extractor, manager)
         # Номер текущей страницы, всегда начинаем с первой страницы
         self.current_page = 1
         # Счетчик пустых страниц подряд для надежной остановки
@@ -77,7 +77,7 @@ class GoldenAppleParser(BaseParser):
             # Если пользователь нажал Отмена во время ожидания карточки, мгновенно выходим
             if not self._is_running:
                 raise ExceptionStopParser("Процесс отменен пользователем.") from e
-            logger.error(f"    [-] [Детальная Ошибка] Не удалось дождаться загрузки карточки ID {product_id}: {e}")
+            logger.error(f"Ошибка. Не удалось дождаться загрузки карточки ID {product_id}: {e}")
             if page is not None:
                 page.close()
             return None
@@ -105,13 +105,13 @@ class GoldenAppleParser(BaseParser):
             except Exception as e:
                 # Превращаем ошибку в строку, разбиваем по строкам и берем первую
                 first_line = str(e).splitlines()[0] if str(e) else "Unknown error"
-                logger.debug(f"Article locator timed out or failed: {first_line}")
+                logger.debug(f"Загрузка тегов для товара не отвечает: {first_line}")
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
             page.evaluate("window.scrollTo(0, 2500);")
             self._smart_sleep(0.3) # Даем Nuxt 3 время среагировать на скролл
 
-            # Даем умный сон 4 секунды, чтобы сетка полностью стабилизировалась в памяти
+            # Даем умный сон 3 секунды, чтобы сетка полностью стабилизировалась в памяти
             self._smart_sleep(3.0)
 
             return page
@@ -119,7 +119,8 @@ class GoldenAppleParser(BaseParser):
         except Exception as e:
             if not self._is_running:
                 raise ExceptionStopParser("Процесс отменен пользователем.") from e
-            logger.error(f"❌ Не удалось прогрузить страницу каталога №{self.current_page}: {str(e).splitlines()[0]}")
+            logger.error(f"Ошибка. Не удалось прогрузить страницу каталога"
+                         f" №{self.current_page}: {str(e).splitlines()[0]}")
             raise e
 
 
@@ -139,7 +140,7 @@ class GoldenAppleParser(BaseParser):
             return cards
 
         except Exception as e:
-            logger.error(f"❌ Не удалось определить количество товаров на странице №{self.current_page}: {e}")
+            logger.error(f"Ошибка. Не удалось определить количество товаров на странице №{self.current_page}: {e}")
             raise e
 
     def _smart_sleep(self, seconds: float) -> None:
@@ -224,7 +225,7 @@ class GoldenAppleParser(BaseParser):
                     self.empty_pages_count = 0
 
                     # Делаем ОДИН запрос к БД и получаем словарь {id: page_number}
-                    db_items_pages = self.saver.check_existing_items_with_pages(item_id_list)
+                    db_items_pages = self.manager.check_existing_items_with_pages(item_id_list)
 
                     # Считаем, сколько товаров с текущей страницы УЖЕ лежат в БД на СТАРЫХ страницах
                     old_duplicates_count = 0
@@ -250,7 +251,7 @@ class GoldenAppleParser(BaseParser):
 
                         # --- Проверка на зацикливание парсинга ---
                         # Получаем максимальный номер страницы из БД
-                        max_page_in_db = self.saver.get_last_page_number()
+                        max_page_in_db = self.manager.get_last_page_number()
 
                         # Если текущий номер больше максимального - ЗАЦИКЛИВАНИЕ
                         if self.current_page > max_page_in_db:
@@ -300,7 +301,7 @@ class GoldenAppleParser(BaseParser):
                             item["page_number"] = self.current_page
 
                             page_batch.append(item)
-                            self.saver.save([item]) # Передаем чистый список из одного товара
+                            self.manager.save([item]) # Передаем чистый список из одного товара
                             saved_in_page += 1
                             continue
                         # --------------------------
@@ -325,7 +326,7 @@ class GoldenAppleParser(BaseParser):
                         item["page_number"] = self.current_page
 
                         # ПОСТРОЧНАЯ ЗАПИСЬ
-                        self.saver.save([item]) # Передаем чистый список из одного товара
+                        self.manager.save([item]) # Передаем чистый список из одного товара
                         saved_in_page += 1
                         # --------------------------------------
 

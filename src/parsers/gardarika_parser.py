@@ -7,7 +7,7 @@ from urllib.parse import urlencode, urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from exceptions import ExceptionStopParser
+from my_exceptions.exceptions import ExceptionStopParser
 from core.base_classes import BaseParser
 
 logger = logging.getLogger(__name__)

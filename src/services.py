@@ -18,14 +18,14 @@ from PyQt6.QtWidgets import (
     QWidget
 )
 
-from scaners.async_scan_ep import AsyncScanEndpoint
+from scanners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
-from src.parser_worker import ParserWorker
+from workers.parser_worker import ParserWorker
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.parsers.golden_apple_parser import GoldenAppleParser
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
-from src.savers.sqlite_saver import SQLiteSaver
-from src.scaner_worker import ScanerWorker
+from src.database.sqlite_manager import DatabaseManager
+from workers.scanner_worker import ScannerWorker
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ def scanning_on_click(obj) -> None:
     obj.scaner_thread = QThread()
 
     # Создаем рабочий объект
-    obj.scaner_worker = ScanerWorker(scaner=scaner)
+    obj.scaner_worker = ScannerWorker(scaner=scaner)
 
     # Перемещаем объект в фоновый поток
     obj.scaner_worker.moveToThread(obj.scaner_thread)
@@ -268,16 +268,16 @@ def parsing_on_click(obj) -> None:
     config = GoldenAppleConfig(target_url, keyword)
     extractor = GoldenAppleExtractor(config)
 
-    saver = SQLiteSaver()  # db_path подхватится из DBConfig: data/viewhub.db
+    manager = DatabaseManager()  # db_path подхватится из DBConfig: storage/viewhub.db
     parser = None  # Инициализируем для использования после try-except
 
     try:
         # Создаём таблицу и привязываем конфиг + session_id к сейверу
-        table_name = saver.init_for_config(config)
-        logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {saver.db_path}")
+        table_name = manager.init_for_config(config)
+        logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {manager.db_path}")
 
         # Парсер создаем только если БД успешно инициализирована
-        parser = GoldenAppleParser(config=config, extractor=extractor, saver=saver)
+        parser = GoldenAppleParser(config=config, extractor=extractor, manager=manager)
 
         # Сохраняем парсер в объекте окна для использования в экспорте
         obj.parser = parser
@@ -290,6 +290,14 @@ def parsing_on_click(obj) -> None:
         raise RuntimeError("Не удалось подготовить базу данных. Парсинг остановлен.") from e
 
     # ====================================================================================
+
+    # Включаем кнопку просмотра
+    if hasattr(obj, "btn_cancel_parsing"):
+        obj.btn_preview_parsing.setEnabled(True)
+
+    # Включаем кнопку экспорта
+    if hasattr(obj, "btn_cancel_parsing"):
+        obj.btn_export_parsing.setEnabled(True)
 
     # Сначала создаем чистый системный поток QThread
     obj.parser_thread = QThread()
@@ -385,7 +393,7 @@ def parsing_export_init(parser) -> str:
     # Задаем базовое имя файла на основе конфига или имени таблицы
     base_name = getattr(parser.config, "file_name", "")
     if not base_name:
-        base_name = getattr(parser.saver, "table_name", "")
+        base_name = getattr(parser.manager, "table_name", "")
 
     if not base_name:
         return ""
@@ -402,15 +410,15 @@ def parsing_db_read(parser, obj) -> pd.DataFrame | None:
     """Чтение таблицы из БД."""
     try:
         # Получаем путь к БД
-        db_path = getattr(parser.saver, "db_path", None)
+        db_path = getattr(parser.manager, "db_path", None)
         if not db_path:
-            logger.error("Не удалось найти путь к базе данных SQLite в parser.saver!")
+            logger.error("Не удалось найти путь к базе данных SQLite в parser.manager!")
             if hasattr(obj, "result_display"):
                 obj.result_display.append("❌ Ошибка: не найден файл базы данных.")
             return None
 
         # Получаем имя таблицы
-        table_name = getattr(parser.saver, "table_name", None)
+        table_name = getattr(parser.manager, "table_name", None)
         if not table_name:
             logger.warning("Не удалось найти таблицу для экспорта.")
             if hasattr(obj, "result_display"):
@@ -495,8 +503,8 @@ def parsing_preview_on_click(obj):
         return
 
     # Получаем путь к БД и имя таблицы
-    db_path = getattr(parser.saver, "db_path", None)
-    table_name = getattr(parser.saver, "table_name", None)
+    db_path = getattr(parser.manager, "db_path", None)
+    table_name = getattr(parser.manager, "table_name", None)
 
     if not db_path or not table_name:
         logger.warning("Ошибка экспорта. Не найден путь к БД или имя таблицы.")

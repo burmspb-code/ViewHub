@@ -65,8 +65,8 @@ class GoldenAppleExtractor(BaseExtractor):
         """Внутренний приватный метод для разбора одной конкретной карточки листинга."""
         try:
             # 1. Извлечение ITEM_ID
-            inner_div = card_soup.find("div", attrs={"data-scroll-id": True})
-            item_id = inner_div["data-scroll-id"].strip() if inner_div else ""
+            inner_div = card_soup.find("div", attrs={"storage-scroll-id": True})
+            item_id = inner_div["storage-scroll-id"].strip() if inner_div else ""
             if not item_id:
                 meta_sku = card_soup.find("meta", attrs={"itemprop": "sku"})
                 item_id = meta_sku["content"].strip() if meta_sku else ""
@@ -164,7 +164,7 @@ class GoldenAppleExtractor(BaseExtractor):
                 "url": product_url,
             }
         except Exception as e:
-            logger.error(f"❌ Ошибка разбора одиночной карточки: {e}")
+            logger.error(f"Ошибка разбора одиночной карточки: {e}")
             return None
 
     def extract_data(self, raw_content: List[Any]) -> List[Dict[str, Any]]:

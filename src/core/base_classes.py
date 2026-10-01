@@ -7,6 +7,15 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, List, ClassVar, Optional
 
 
+class BaseDataBase(ABC):
+    """Абстрактный класс для работы с базами данных."""
+
+    @abstractmethod
+    def _connect(self):
+        """Устанавливает соединение с БД."""
+        pass
+
+
 class BaseDBParsingConfig(ABC):
     """Абстрактный класс конфигурации базы данных для парсинга."""
 
@@ -70,10 +79,10 @@ class BaseParser(ABC):
     Абстрактный класс для управления сетевой логикой и навигацией по сайту.
     """
 
-    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, saver: BaseSaver):
+    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, manager: BaseDataBase):
         self.config: BaseDBParsingConfig = config
         self.extractor: BaseExtractor = extractor
-        self.saver: BaseSaver = saver
+        self.manager: BaseDataBase = manager
         self._is_running: bool = True
 
     def cancel(self) -> None:
@@ -95,7 +104,7 @@ class BaseParser(ABC):
         pass
 
 
-class BaseScaner(ABC):
+class BaseScanner(ABC):
     """
     Абстрактный класс для управления сканированием.
     """

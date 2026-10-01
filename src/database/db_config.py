@@ -18,7 +18,7 @@ class DBParsingConfig:
         Приоритет:
         1. Переданный аргумент custom_path — явное указание побеждает всё
         2. Переменная окружения DB_PATH — настройка по умолчанию для машины
-        3. Путь по умолчанию (data/viewhub.db)
+        3. Путь по умолчанию (storage/viewhub.db)
         """
         # 1. Явный аргумент имеет наивысший приоритет
         if custom_path:
@@ -33,9 +33,9 @@ class DBParsingConfig:
         # Поднимаемся из src/core/db_config.py на 3 уровня вверх,
         # чтобы попасть в корень проекта
         root_dir = Path(__file__).resolve().parent.parent.parent
-        data_dir = root_dir / "data"
+        data_dir = root_dir / "storage"
 
-        # Создаем папку data, если её нет
+        # Создаем папку storage, если её нет
         data_dir.mkdir(parents=True, exist_ok=True)
 
         return data_dir / cls.DEFAULT_DB_NAME

@@ -5,12 +5,12 @@ import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from core.base_classes import BaseScaner
+from core.base_classes import BaseScanner
 
 logger = logging.getLogger(__name__)
 
 
-class ScanerWorker(QObject):
+class ScannerWorker(QObject):
     """
     Универсальный рабочий поток PyQt6 для работы с объектами сканеров.
     """
@@ -18,9 +18,9 @@ class ScanerWorker(QObject):
     progress_signal = pyqtSignal(str)     # Статус выполнения для GUI (например, "Обработано 5/100")
     finished_signal = pyqtSignal(object)  # Сигнал завершения (передает финальные данные или None)
 
-    def __init__(self, scaner: "BaseScaner"):
+    def __init__(self, scaner: "BaseScanner"):
         super().__init__()
-        self.scaner: "BaseScaner" = scaner
+        self.scaner: "BaseScanner" = scaner
         self._stop_event = threading.Event()  # Потокобезопасный флаг остановки
 
     def stop(self) -> None:
