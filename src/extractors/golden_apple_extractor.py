@@ -3,7 +3,7 @@ import re
 from typing import Any, List, Dict
 from bs4 import BeautifulSoup
 
-from core.base_classes import BaseExtractor, BaseDBParsingConfig
+from src.core.base_classes import BaseExtractor, BaseDBParsingConfig
 
 logger = logging.getLogger(__name__)
 

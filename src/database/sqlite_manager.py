@@ -12,8 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core.base_classes import BaseDBParsingConfig, BaseDataBase
-from database.db_config import DBParsingConfig
+from src.core.base_classes import BaseDBParsingConfig, BaseDataBase
+from src.database.db_config import DBParsingConfig
 
 
 logger = logging.getLogger(__name__)

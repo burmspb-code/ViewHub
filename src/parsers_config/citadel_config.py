@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from core.base_classes import BaseConfig
+from src.core.base_classes import BaseConfig
 
 
 class CitadelConfig(BaseConfig):

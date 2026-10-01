@@ -7,7 +7,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
-from core.base_classes import BaseScanner
+from src.core.base_classes import BaseScanner
 
 logger = logging.getLogger(__name__)
 

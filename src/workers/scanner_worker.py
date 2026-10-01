@@ -5,7 +5,7 @@ import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from core.base_classes import BaseScanner
+from src.core.base_classes import BaseScanner
 
 logger = logging.getLogger(__name__)
 

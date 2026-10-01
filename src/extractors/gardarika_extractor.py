@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from bs4 import BeautifulSoup
 
 from my_exceptions.exceptions import ExceptionStopParser
-from core.base_classes import BaseConfig, BaseExtractor
+from src.core.base_classes import BaseConfig, BaseExtractor
 
 
 class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переименовано в GardarikiExtractor

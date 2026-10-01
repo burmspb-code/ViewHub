@@ -18,14 +18,14 @@ from PyQt6.QtWidgets import (
     QWidget
 )
 
-from scanners.async_scan_ep import AsyncScanEndpoint
+from src.scanners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
-from workers.parser_worker import ParserWorker
+from src.workers.parser_worker import ParserWorker
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.parsers.golden_apple_parser import GoldenAppleParser
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 from src.database.sqlite_manager import DatabaseManager
-from workers.scanner_worker import ScannerWorker
+from src.workers.scanner_worker import ScannerWorker
 
 logger = logging.getLogger(__name__)
 

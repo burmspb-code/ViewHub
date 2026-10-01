@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from my_exceptions.exceptions import ExceptionStopParser
-from core.base_classes import BaseParser
+from src.core.base_classes import BaseParser
 
 logger = logging.getLogger(__name__)
 

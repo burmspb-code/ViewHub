@@ -11,9 +11,9 @@ from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
 
-from core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
+from src.core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
 from src.database.sqlite_manager import DatabaseManager
-from my_exceptions.exceptions import ExceptionStopParser
+from src.my_exceptions.exceptions import ExceptionStopParser
 
 
 logger = logging.getLogger(__name__)

@@ -5,8 +5,8 @@ import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from my_exceptions.exceptions import ExceptionStopParser
-from core.base_classes import BaseParser, BaseDataBase
+from src.my_exceptions.exceptions import ExceptionStopParser
+from src.core.base_classes import BaseParser, BaseDataBase
 
 logger = logging.getLogger(__name__)
 

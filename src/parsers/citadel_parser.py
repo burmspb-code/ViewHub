@@ -6,7 +6,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 from my_exceptions.exceptions import ExceptionStopParser
-from core.base_classes import BaseParser
+from src.core.base_classes import BaseParser
 
 
 class CitadelParser(BaseParser):
