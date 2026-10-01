@@ -49,6 +49,7 @@ class GoldenAppleParser(BaseParser):
 
         return url
 
+
     def load_product_detail_page(self, context, product_url: str, product_id: str) -> Any:
         """
         Модуль 3 (СИНХРОННЫЙ ООП вариант): Открытие фоновой вкладки товара.
@@ -84,34 +85,22 @@ class GoldenAppleParser(BaseParser):
 
     def load_catalog_page(self, page, url: str) -> Any:
         """Загрузка страницы каталога с защитой от Lazy-Render скрытого режима."""
-        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
-        page.route(
-            "**/*",
-            lambda route: (
-                route.abort()
-                if route.request.resource_type in ["image", "font", "media", "image-set"]
-                else route.continue_()
-            ),
-        )
-
         try:
-            # Загружаем базовый URL
+            # Загружаем переданный URL
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            # Ждем прикрепления тега в DOM (attached) вместо видимости на экране (visible)
-            # Это полностью исключает TimeoutError в скрытом (headless) режиме!
+
+            # Ждем прикрепления тега в DOM (attached)
             try:
-                page.locator("article").first.wait_for(state="attached", timeout=10000)
+                page.locator("article").first.wait_for(state="attached", timeout=60000)
             except Exception as e:
-                # Превращаем ошибку в строку, разбиваем по строкам и берем первую
                 first_line = str(e).splitlines()[0] if str(e) else "Unknown error"
                 logger.debug(f"Загрузка тегов для товара не отвечает: {first_line}")
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
             page.evaluate("window.scrollTo(0, 2500);")
-            self._smart_sleep(0.3) # Даем Nuxt 3 время среагировать на скролл
+            self._smart_sleep(0.3)
 
-            # Даем умный сон 3 секунды, чтобы сетка полностью стабилизировалась в памяти
+            # Даем умный сон 3 секунды, чтобы сетка полностью стабилизировалась
             self._smart_sleep(3.0)
 
             return page
@@ -119,10 +108,10 @@ class GoldenAppleParser(BaseParser):
         except Exception as e:
             if not self._is_running:
                 raise ExceptionStopParser("Процесс отменен пользователем.") from e
-            logger.error(f"Ошибка. Не удалось прогрузить страницу каталога"
-                         f" №{self.current_page}: {str(e).splitlines()[0]}")
+            logger.error(
+                f"Ошибка. Не удалось прогрузить страницу каталога №{self.current_page}: {str(e).splitlines()[0]}"
+            )
             raise e
-
 
     def count_and_get_products_on_page(self, page) -> Any:
         """
@@ -156,6 +145,7 @@ class GoldenAppleParser(BaseParser):
             time.sleep(0.1)
 
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
+        """Запуск основного цикла парсинга."""
         def to_gui(msg: str):
             callback = getattr(self, "progress_callback", None)
             if callback is not None and callable(callback):
@@ -170,11 +160,15 @@ class GoldenAppleParser(BaseParser):
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--blink-settings=imagesEnabled=false",
+                    "--no-sandbox",  # ОБЯЗАТЕЛЬНО ДЛЯ LINUX (под root)
+                    "--disable-setuid-sandbox",  # ОБЯЗАТЕЛЬНО ДЛЯ LINUX (под root)
+                    "--disable-dev-shm-usage",  # ОБЯЗАТЕЛЬНО ДЛЯ VPS (память в /dev/shm)
+                    "--disable-gpu",  # ОБЯЗАТЕЛЬНО ДЛЯ СЕРВЕРА (нет видеокарты)
                 ],
                 viewport={"width": 1920, "height": 1080},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                           " AppleWebKit/537.36 (KHTML, like Gecko)"
-                           " Chrome/124.0.0.0 Safari/537.36",
+                " AppleWebKit/537.36 (KHTML, like Gecko)"
+                " Chrome/124.0.0.0 Safari/537.36",
                 locale="ru-RU",
                 timezone_id="Europe/Moscow",
             )
@@ -184,6 +178,25 @@ class GoldenAppleParser(BaseParser):
             context.clear_permissions()
 
             page = context.new_page()
+
+            # 1. БЛОКИРОВКА КАРТИНОК И ШРИФТОВ ДЛЯ СКОРОСТИ И ЭКОНОМИИ ОЗУ (ОСТАВЛЯЕМ)
+            page.route(
+                "**/*",
+                lambda route: (
+                    route.abort()
+                    if route.request.resource_type in ["image", "font", "media", "image-set"]
+                    else route.continue_()
+                ),
+            )
+
+            # 2. АКТИВАЦИЯ ПОЛНОГО STEALTH-СЛЕПОК ЧЕРЕЗ БИБЛИОТЕКУ (ОСТАВЛЯЕМ)
+            try:
+                from playwright_stealth import stealth_sync
+                stealth_sync(page)
+                to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
+            except Exception as stealth_err:
+                logger.debug(f"Ошибка активации stealth-маскировки: {stealth_err}")
+            # ---------------------------------------------------------------
 
             try:
                 while True:
