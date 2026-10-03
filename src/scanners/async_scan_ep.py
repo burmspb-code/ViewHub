@@ -33,7 +33,6 @@ class AsyncScanEndpoint(BaseScanner):
             # Сюда прилетит ошибка благодаря нашему raise на Шаге 1
             return []  # 👈 Теперь возвращать пустой список здесь абсолютно безопасно!
 
-
     async def _run_async_scan(self, worker) -> list:
         """
         Единственное место, контролирующее отмену.
@@ -81,10 +80,10 @@ def extract_paths_from_html(soup, response_text):
     raw_paths = set()
 
     # Извлекаем пути из тегов
-    for tag in soup.find_all(['a', 'form', 'script']):
-        path = tag.get('href') or tag.get('action') or tag.get('src')
+    for tag in soup.find_all(["a", "form", "script"]):
+        path = tag.get("href") or tag.get("action") or tag.get("src")
         if path and path.startswith("/"):
-            clean_path = path.split('?')[0]
+            clean_path = path.split("?")[0]
             raw_paths.add(clean_path)
 
     # Извлекаем пути из текста через regex
@@ -126,7 +125,7 @@ async def collect_modules_from_html(client, base_url, worker):
             worker.progress_signal.emit(f"[📡] Подключение к цели: {base_url}")
 
         response = await client.get(base_url, timeout=5.0)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, "html.parser")
 
         # Извлекаем все пути
         raw_paths = extract_paths_from_html(soup, response.text)
@@ -148,19 +147,56 @@ def get_scan_dictionaries():
     Возвращает предзагруженные словари для сканирования.
     """
     generic_actions = [
-        "", "list", "all", "create", "add", "edit", "update", "delete", "remove", "refresh",
-        "create-api", "update-api", "delete-api", "delete-image"
+        "",
+        "list",
+        "all",
+        "create",
+        "add",
+        "edit",
+        "update",
+        "delete",
+        "remove",
+        "refresh",
+        "create-api",
+        "update-api",
+        "delete-api",
+        "delete-image",
     ]
     generic_pks = ["1", "2"]
     generic_slugs = ["test", "sample", "item", "product", "category"]
 
     business_entities = [
-        "task", "tasks", "bookmark", "bookmarks", "daily", "todo", "courses", "lessons",
-        "product", "products", "category", "categories", "catalog", "shop", "cart", "orders", "vendor"
+        "task",
+        "tasks",
+        "bookmark",
+        "bookmarks",
+        "daily",
+        "todo",
+        "courses",
+        "lessons",
+        "product",
+        "products",
+        "category",
+        "categories",
+        "catalog",
+        "shop",
+        "cart",
+        "orders",
+        "vendor",
     ]
     auth_tokens = [
-        "auth", "login", "register", "logout", "token", "refresh", "me", "profile", "payments",
-        "password-reset", "password-reset/done", "password-reset/confirm"
+        "auth",
+        "login",
+        "register",
+        "logout",
+        "token",
+        "refresh",
+        "me",
+        "profile",
+        "payments",
+        "password-reset",
+        "password-reset/done",
+        "password-reset/confirm",
     ]
     target_prefixes = ["users", "auth", "api", "v1", "v2", "aurora"]
 
@@ -170,7 +206,7 @@ def get_scan_dictionaries():
         "slugs": generic_slugs,
         "entities": business_entities,
         "tokens": auth_tokens,
-        "prefixes": target_prefixes
+        "prefixes": target_prefixes,
     }
 
 
@@ -261,6 +297,7 @@ def generate_deep_rest_paths(dictionaries):
 
     return paths
 
+
 def generate_root_paths(dictionaries):
     """
     Генерирует корневые пути для монолитных приложений.
@@ -311,14 +348,17 @@ def display_scan_statistics(worker, discovered_modules, business_entities, auth_
     worker.progress_signal.emit("-" * 50)
 
     worker.progress_signal.emit("[🔸] ПРЕДЗАГРУЖЕННЫЙ ИИ-СЛОВАРЬ ДЛЯ ПОИСКА СКРЫТЫХ ЗОН:")
-    worker.progress_signal.emit(f"    ├── Бизнес-сущности ({len(business_entities)} шт.):"
-                                f" {', '.join(business_entities[:6])}...")
-    worker.progress_signal.emit(f"    ├── ИБ-токены/Авторизация ({len(auth_tokens)} шт.):"
-                                f" {', '.join(auth_tokens[:5])}...")
+    worker.progress_signal.emit(
+        f"    ├── Бизнес-сущности ({len(business_entities)} шт.): {', '.join(business_entities[:6])}..."
+    )
+    worker.progress_signal.emit(
+        f"    ├── ИБ-токены/Авторизация ({len(auth_tokens)} шт.): {', '.join(auth_tokens[:5])}..."
+    )
     worker.progress_signal.emit("=" * 70 + "\n")
 
-    worker.progress_signal.emit(f"[📡] Снайперская матрица сгенерировала ОПТИМАЛЬНОЕ покрытие:"
-                                f" {paths_count} комбинаций путей.")
+    worker.progress_signal.emit(
+        f"[📡] Снайперская матрица сгенерировала ОПТИМАЛЬНОЕ покрытие: {paths_count} комбинаций путей."
+    )
 
 
 def format_endpoint_info(endpoint_status):
@@ -367,7 +407,8 @@ async def check_single_endpoint(client, semaphore, base_url, endpoint_path, root
             if is_target_path and endpoint_status != 404:
                 worker.progress_signal.emit(
                     f"[🔍 REGEX СЕТЬ] Перехват роута: {endpoint_path} | "
-                    f"Статус: {endpoint_status} | Длина: {response_len}")
+                    f"Статус: {endpoint_status} | Длина: {response_len}"
+                )
 
             if endpoint_status == 404:
                 return None
@@ -443,7 +484,7 @@ async def scan_black_box_api(base_url: str, worker) -> list:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NeoMarket-Sniper/5.2",
         "Accept": "application/json, text/html, */*",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
+        "Pragma": "no-cache",
     }
 
     semaphore = asyncio.Semaphore(15)
@@ -465,16 +506,16 @@ async def scan_black_box_api(base_url: str, worker) -> list:
         display_scan_statistics(worker, discovered_modules, business_entities, auth_tokens, len(paths_to_check))
 
         # Контрольная проверка
-        auth_patterns = re.compile(r'(login|register|auth|password-reset|me|payments)')
+        auth_patterns = re.compile(r"(login|register|auth|password-reset|me|payments)")
         bug_path_check = "/users/api/v1/auth/login/"
         worker.progress_signal.emit(
             f"[🔍 REGEX ПРОВЕРКА] Присутствует ли /users/api/v1/auth/login/ в матрице? ->"
-            f" {bug_path_check in set(paths_to_check)}")
+            f" {bug_path_check in set(paths_to_check)}"
+        )
 
         # ЭТАП 4: Активное зондирование
         found_endpoints = await scan_endpoints(
-            client, semaphore, base_url, paths_to_check,
-            root_fingerprint, auth_patterns, worker
+            client, semaphore, base_url, paths_to_check, root_fingerprint, auth_patterns, worker
         )
 
     display_final_report(worker, found_endpoints)

@@ -39,4 +39,3 @@ class DBParsingConfig:
         data_dir.mkdir(parents=True, exist_ok=True)
 
         return data_dir / cls.DEFAULT_DB_NAME
-

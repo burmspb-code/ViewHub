@@ -5,7 +5,8 @@ import logging
 
 # Импортируем пакет src. В этот момент автоматически загрузится .env
 # и настроится логгер ДО того, как импортируется PyQt и MainWindow.
-import src # noqa: F401
+import src  # noqa: F401
+
 from PyQt6.QtWidgets import QApplication
 from src.windows_pq import MainWindow
 

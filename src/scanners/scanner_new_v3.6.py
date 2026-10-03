@@ -20,7 +20,7 @@ async def probe_status_double(client: httpx.AsyncClient, base_url: str, path: st
     # Запускаем два запроса параллельно в один миг
     tasks = [
         client.get(full_url, timeout=2.0),
-        client.post(full_url, json={}, timeout=2.0)  # Пустой JSON для пробива REST API
+        client.post(full_url, json={}, timeout=2.0),  # Пустой JSON для пробива REST API
     ]
     try:
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -48,7 +48,7 @@ async def discover_architecture(base_url: str):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CyberSniper-Core/7.0",
         "Accept": "text/html,application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
+        "Pragma": "no-cache",
     }
 
     try:
@@ -59,11 +59,11 @@ async def discover_architecture(base_url: str):
             response = await client.get(base_url, timeout=5.0)
 
             # 1. Извлекаем пути из HTML-тегов
-            soup = BeautifulSoup(response.text, 'html.parser')
-            for tag in soup.find_all(['a', 'form', 'script']):
-                path = tag.get('href') or tag.get('action') or tag.get('src')
+            soup = BeautifulSoup(response.text, "html.parser")
+            for tag in soup.find_all(["a", "form", "script"]):
+                path = tag.get("href") or tag.get("action") or tag.get("src")
                 if path and path.startswith("/"):
-                    clean_path = path.split('?')[0].strip("/")
+                    clean_path = path.split("?")[0].strip("/")
                     if clean_path:
                         raw_paths.add(clean_path)
 
@@ -92,16 +92,42 @@ async def discover_architecture(base_url: str):
                 # Загружаем базовые корневые префиксы, по которым обычно строятся API в СНГ
                 candidates = {
                     # СТАНДАРТНЫЕ ПРЕФИКСЫ И ВЕРСИОНИРОВАНИЕ
-                    "api", "v1", "v2", "v3", "rest", "graphql", "gql",
-
+                    "api",
+                    "v1",
+                    "v2",
+                    "v3",
+                    "rest",
+                    "graphql",
+                    "gql",
                     # СИСТЕМНЫЕ И АДМИНСКИЕ МОДУЛИ
-                    "auth", "users", "account", "accounts", "admin", "dashboard", "panel", "core",
-
+                    "auth",
+                    "users",
+                    "account",
+                    "accounts",
+                    "admin",
+                    "dashboard",
+                    "panel",
+                    "core",
                     # СЕРВИСНЫЕ ЭНДПОИНТЫ И АВТОМАТИЗАЦИЯ
-                    "mail", "mailings", "logs", "logger", "metrics", "status", "health", "ping",
-
+                    "mail",
+                    "mailings",
+                    "logs",
+                    "logger",
+                    "metrics",
+                    "status",
+                    "health",
+                    "ping",
                     # СПЕЦИФИКА ТЕКУЩИХ ПРОЕКТОВ (Aurora, Мобильные бэкенды)
-                    "aurora", "lessons", "courses", "catalog", "shop", "products", "library", "daily", "tasks", "token"
+                    "aurora",
+                    "lessons",
+                    "courses",
+                    "catalog",
+                    "shop",
+                    "products",
+                    "library",
+                    "daily",
+                    "tasks",
+                    "token",
                 }
 
             VALID_STATUSES = [200, 401, 403, 405, 500]
@@ -118,7 +144,7 @@ async def discover_architecture(base_url: str):
                     "slug_action": probe_status_double(client, base_url, f"/{cand}/test/delete-image/"),
                     "create": probe_status_double(client, base_url, f"/{cand}/create/"),
                     "login": probe_status_double(client, base_url, f"/{cand}/login/"),
-                    "alt": probe_status_double(client, base_url, f"/{cand}")
+                    "alt": probe_status_double(client, base_url, f"/{cand}"),
                 }
 
             # Схлопываем все задачи в плоский список для asyncio.gather
@@ -193,7 +219,6 @@ async def discover_architecture(base_url: str):
                     # Корень мертв, но внутри есть экшены — Закрытое App-приложение
                     django_apps[cand] = "Скрытое App-приложение (Корень 404)"
 
-
                 else:
                     # Финальная страховка для одиночных роутов без слэша наружу (Версия 4.5 — DRF Роутер Иммунитет)
                     status_alt_get = res_alt if len(res_alt) > 0 else 404
@@ -244,12 +269,8 @@ async def discover_architecture(base_url: str):
             print(f"    └── /{model}/ (Обнаружен живой почерк)")
     else:
         # ЯВНЫЙ КОММЕНТАРИЙ ПО ВАШЕМУ УКАЗАНИЮ: снимает любые вопросы при аудите
-        print(
-            "    └── (Корневых моделей данных не обнаружено)"
-        )
-        print(
-            "        [💡] Инфо: Это нормально для чистых API или проектов с глубокой вложенностью."
-        )
+        print("    └── (Корневых моделей данных не обнаружено)")
+        print("        [💡] Инфо: Это нормально для чистых API или проектов с глубокой вложенностью.")
         print(
             "        [💡] Модели (типа /task/, /bookmark/) скрыты внутри приложений и вскроются при фаззинге матрицы."
         )

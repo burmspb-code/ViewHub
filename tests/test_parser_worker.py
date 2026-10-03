@@ -14,6 +14,7 @@ def mock_parser():
     parser.cancel = MagicMock()
     return parser
 
+
 def test_parser_worker_init_with_config():
     """Тест инициализации ParserWorker: сценарий с наличием конфига."""
     mock_parser = MagicMock()
@@ -28,6 +29,7 @@ def test_parser_worker_init_with_config():
     assert worker.file_name == "goldenapple_ru"
 
     assert hasattr(worker, "manager") is True
+
 
 def test_parser_worker_init_without_config():
     """Тест инициализации ParserWorker: сценарий с отсутствием конфига."""

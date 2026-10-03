@@ -129,7 +129,7 @@ PREVIEW_BUTTON_STYLE = """
 """
 
 # Стиль компактной кнопки "Показать" пароль
-TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;" # noqa: S105
+TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;"  # noqa: S105
 
 # Зеленая акцентная кнопка "Войти/Начать"
 SUBMIT_BUTTON_STYLE = """

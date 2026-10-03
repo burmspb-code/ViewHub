@@ -9,14 +9,7 @@ import pandas as pd
 from contextlib import suppress
 
 from PyQt6.QtCore import QThread
-from PyQt6.QtWidgets import (
-    QFileDialog,
-    QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-    QWidget
-)
+from PyQt6.QtWidgets import QFileDialog, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from src.scanners.async_scan_ep import AsyncScanEndpoint
 from src.auth.api_client import login_to_django
@@ -102,16 +95,10 @@ def request_on_click(obj) -> None:
         return
 
     # Передаем JWT-токен с правильным префиксом Bearer
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # Передаем параметры фильтрации/поиска (Query Parameters)
-    params = {
-        "page": 1,
-        "status": "active"
-    }
+    params = {"page": 1, "status": "active"}
 
     logger.info(f"Отправка GET-запроса на {full_url}...")
     obj.result_display.append(f"Запрос: GET {full_url}\nПараметры: {params}")
@@ -190,9 +177,7 @@ def scanning_on_click(obj) -> None:
     obj.scaner_thread.finished.connect(obj.scaner_worker.deleteLater)
 
     # Подключаем сигналы воркера
-    obj.scaner_worker.progress_signal.connect(
-        lambda msg: _update_parsing_status(obj, msg)
-    )
+    obj.scaner_worker.progress_signal.connect(lambda msg: _update_parsing_status(obj, msg))
     obj.scaner_worker.finished_signal.connect(lambda obj_scan: _scanning_success_handler(obj, obj_scan))
 
     obj.result_display.append(f"⏳ Запуск сканера для сайта: {base_url}")
@@ -205,21 +190,21 @@ def scanning_on_click(obj) -> None:
 def scanning_cancel_on_click(obj) -> None:  # Исправлено: Nome -> None
     """Обработчик нажатия на кнопку 'ОТМЕНИТЬ' во время сканирования."""
     # Проверяем, запущен ли поток сканера в данный момент
-    if hasattr(obj, 'scaner_thread') and obj.scaner_thread.isRunning():
+    if hasattr(obj, "scaner_thread") and obj.scaner_thread.isRunning():
         logger.info("Запрос на отмену сканирования отправлен пользователем...")
 
         # Выводим красивый статус пользователю в текстовую панель
-        if hasattr(obj, 'result_display'):
+        if hasattr(obj, "result_display"):
             obj.result_display.append("🛑 Останавливаем сканирование, пожалуйста, подождите...")
 
         # Делаем кнопку отмены временно неактивной, чтобы избежать спам-кликов
-        if hasattr(obj, 'btn_cancel_scanning'):
+        if hasattr(obj, "btn_cancel_scanning"):
             obj.btn_cancel_scanning.setEnabled(False)
 
         # Поднимаем потокобезопасный флаг остановки внутри воркера.
         # Асинхронный наблюдатель watcher_task внутри сканера поймает этот флаг
         # за 100 мс и мгновенно прервет сетевые запросы.
-        if hasattr(obj, 'scaner_worker'):
+        if hasattr(obj, "scaner_worker"):
             obj.scaner_worker.stop()
     else:
         logger.warning("Невозможно отменить сканирование: процесс не запущен или уже завершен.")
@@ -388,6 +373,7 @@ def parsing_export_on_click(obj):
         if hasattr(obj, "btn_export_parsing"):
             obj.btn_export_parsing.setEnabled(True)
 
+
 def parsing_export_init(parser) -> str:
     """Формируем имя файла для экспорта."""
     # Задаем базовое имя файла на основе конфига или имени таблицы
@@ -399,12 +385,13 @@ def parsing_export_init(parser) -> str:
         return ""
 
     # Добавляем расширение по умолчанию, если его нет в имени таблицы/конфига
-    if not base_name.endswith(('.xlsx', '.csv')):
+    if not base_name.endswith((".xlsx", ".csv")):
         path_name = f"{base_name}.xlsx"
     else:
         path_name = base_name
 
     return path_name
+
 
 def parsing_db_read(parser, obj) -> pd.DataFrame | None:
     """Чтение таблицы из БД."""
@@ -448,6 +435,7 @@ def parsing_db_read(parser, obj) -> pd.DataFrame | None:
         if hasattr(obj, "result_display"):
             obj.result_display.append(f"❌ Ошибка чтения БД: {error_msg}")
         return None
+
 
 def parsing_file_save(df, path_name, obj) -> None:
     """Сохранение данных в файл."""
@@ -536,6 +524,7 @@ def parsing_preview_on_click(obj):
             if hasattr(obj, "btn_preview_parsing"):
                 obj.btn_preview_parsing.setEnabled(True)
 
+
 def close_db_viewer(obj):
     """Закрытие виджета с таблицей и возврат к result_display."""
     if hasattr(obj, "db_viewer") and obj.db_viewer:
@@ -549,6 +538,7 @@ def close_db_viewer(obj):
         # Разблокируем кнопку просмотра
         if hasattr(obj, "btn_preview_parsing"):
             obj.btn_preview_parsing.setEnabled(True)
+
 
 def create_db_viewer(db_path: str, table_name: str, obj) -> QWidget:
     """Создает виджет для просмотра таблицы SQLite через pandas + QTableWidget."""
@@ -605,6 +595,7 @@ def _update_parsing_status(obj, message: str) -> None:
     """Пишет рабочие сообщения в информационное окно."""
     obj.result_display.append(message)
 
+
 def _stop_handler(obj, msg: str) -> None:
     """Информирует о принудительной остановке процесса пользователем."""
     obj.result_display.append("🛑 Процесс остановлен!")
@@ -625,7 +616,7 @@ def _stop_handler(obj, msg: str) -> None:
         obj.btn_cancel_scanning.setEnabled(True)
 
 
-def _parsing_success_handler(obj, output_file: str="") -> None:
+def _parsing_success_handler(obj, output_file: str = "") -> None:
     """Вызывается автоматически при успешном завершении парсинга."""
     # Разблокируем интерфейс обратно
     if getattr(obj, "btn_send_scanning", None):

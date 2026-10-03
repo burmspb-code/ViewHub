@@ -93,7 +93,7 @@ class BaseParser(ABC):
     # Вызывается автоматически внутри метода cancel() перед остановкой основного цикла.
     # Предназначен для кастомной очистки ресурсов конкретного сайта.
     # Переопределение метода опционально. При переопределении вызывайте super()._on_cancel().
-    def _on_cancel(self) -> None: # noqa: B027
+    def _on_cancel(self) -> None:  # noqa: B027
         pass
 
     @abstractmethod
@@ -108,6 +108,7 @@ class BaseScanner(ABC):
     """
     Абстрактный класс для управления сканированием.
     """
+
     def __init__(self, base_url: str):
         self.base_url = base_url
 

@@ -33,7 +33,7 @@ from src.core.styles import (
     CANCEL_BUTTON_STYLE,
     TOGGLE_PWD_VISIBILITY_STYLE,
     EXPORT_BUTTON_STYLE,
-    PREVIEW_BUTTON_STYLE
+    PREVIEW_BUTTON_STYLE,
 )
 from src.services import (
     auth_on_click,
@@ -43,10 +43,11 @@ from src.services import (
     scanning_on_click,
     scanning_cancel_on_click,
     parsing_export_on_click,
-    parsing_preview_on_click
+    parsing_preview_on_click,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class MainWindow(QWidget):
     """
@@ -91,6 +92,7 @@ class MainWindow(QWidget):
         # Элементы полей настроек (для примера предустановок)
         self.timeout_input = None
         self.btn_save_settings = None
+        self.proxy_url = None
 
         # Навигация сканирования
         self.btn_scanning_menu = None
@@ -139,7 +141,6 @@ class MainWindow(QWidget):
         # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
         self.init_ui()
         self.connect_signals()
-
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
@@ -404,23 +405,30 @@ class MainWindow(QWidget):
         settings_layout.addWidget(self.btn_back_settings)
         settings_layout.addSpacing(5)
 
-        lbl_settings_title = QLabel("Предустановки системы")
+        lbl_settings_title = QLabel("Настройки системы")
         lbl_settings_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #ffffff;")
         settings_layout.addWidget(lbl_settings_title)
         settings_layout.addSpacing(5)
 
         settings_layout.addWidget(QLabel("Таймаут запросов (сек):"))
         self.timeout_input = QLineEdit()
-        self.timeout_input.setPlaceholderText("7")
-        self.timeout_input.setText("7")
+        self.timeout_input.setPlaceholderText("10")
+        self.timeout_input.setText("")
         self.timeout_input.setFixedHeight(35)  # Фиксируем высоту
         settings_layout.addWidget(self.timeout_input)
 
-        settings_layout.addWidget(QLabel("Папка импорта данных:"))
+        settings_layout.addWidget(QLabel("Загрузить базовую конфигурацию"))
         self.import_path_input = QLineEdit()
-        self.import_path_input.setPlaceholderText("./logs")
+        self.import_path_input.setPlaceholderText("table_shema")
+        self.import_path_input.setText("")
         self.import_path_input.setFixedHeight(35)  # Фиксируем высоту
         settings_layout.addWidget(self.import_path_input)
+
+        settings_layout.addWidget(QLabel("Прокси адрес:"))
+        self.proxy_url = QLineEdit()
+        self.proxy_url.setPlaceholderText("176.15.164.69")
+        self.proxy_url.setFixedHeight(35)  # Фиксируем высоту
+        settings_layout.addWidget(self.proxy_url)
 
         settings_layout.addSpacing(15)
         self.btn_save_settings = QPushButton("Сохранить конфигурацию")
@@ -556,11 +564,11 @@ class MainWindow(QWidget):
         self.btn_parsing_menu.clicked.connect(self.show_parsing_page)  # На форму парсинга
         self.btn_back_parsing.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
-        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self)) # Отмена парсинга
-        self.btn_export_parsing.clicked.connect(lambda: parsing_export_on_click(self)) # Экспорт парсинга
-        self.btn_preview_parsing.clicked.connect(lambda: parsing_preview_on_click(self)) # Просмотр парсинга
+        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self))  # Отмена парсинга
+        self.btn_export_parsing.clicked.connect(lambda: parsing_export_on_click(self))  # Экспорт парсинга
+        self.btn_preview_parsing.clicked.connect(lambda: parsing_preview_on_click(self))  # Просмотр парсинга
 
         # Настройки
-        self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек
+        self.btn_settings_menu.clicked.connect(self.show_settings_page)  # На форму настроек
         self.btn_back_settings.clicked.connect(self.show_menu_page)
         self.btn_save_settings.clicked.connect(self.on_save_settings_click)

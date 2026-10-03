@@ -10,7 +10,7 @@ load_dotenv()
 setup_logger(name="", level=logging.INFO)
 
 # Если приложение скомпилировано в PyInstaller
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     # На Windows задаем путь к локальному AppData пользователя
     if sys.platform.startswith("win"):
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(os.environ["LOCALAPPDATA"], "ms-playwright")

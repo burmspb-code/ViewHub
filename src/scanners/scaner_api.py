@@ -5,9 +5,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # Регулярное выражение для поиска путей API в коде (например: /api/v1/users, /v2/tasks)
-API_PATTERN = re.compile(
-    r'(?:"|\')((?:/api/|/v\d+/|/endpoint/)[a-zA-Z0-9_\-\.\/]+)(?:"|\')'
-)
+API_PATTERN = re.compile(r'(?:"|\')((?:/api/|/v\d+/|/endpoint/)[a-zA-Z0-9_\-\.\/]+)(?:"|\')')
 
 
 def get_js_links(base_url: str, html_content: str) -> set:
@@ -44,9 +42,7 @@ def auto_scan_site_api(target_url: str):
     print(f"[🔄] Запуск сканирования сайта: {target_url}")
 
     # Заголовки, чтобы сайт не заблокировал нас как робота
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     found_endpoints = set()
 
@@ -55,9 +51,7 @@ def auto_scan_site_api(target_url: str):
             # 1. Сканируем главную страницу
             response = client.get(target_url)
             if response.status_code != 200:
-                print(
-                    f"[❌] Не удалось загрузить сайт. Статус-код: {response.status_code}"
-                )
+                print(f"[❌] Не удалось загрузить сайт. Статус-код: {response.status_code}")
                 return
 
             print("[📌] Сканируем HTML-код главной страницы...")
@@ -73,9 +67,7 @@ def auto_scan_site_api(target_url: str):
                     print(f"    ➡️ Сканируем скрипт: {urlparse(js_url).path}")
                     js_res = client.get(js_url)
                     if js_res.status_code == 200:
-                        found_endpoints.update(
-                            scan_text_for_endpoints(js_res.text)
-                        )
+                        found_endpoints.update(scan_text_for_endpoints(js_res.text))
                 except httpx.HTTPError:
                     continue
 
@@ -84,9 +76,7 @@ def auto_scan_site_api(target_url: str):
         return
 
     # Выводим результат
-    print(
-        f"\n[🎉] Сканирование завершено! Автоматически найдено эндпоинтов: {len(found_endpoints)}"
-    )
+    print(f"\n[🎉] Сканирование завершено! Автоматически найдено эндпоинтов: {len(found_endpoints)}")
     print("=" * 60)
     for route in sorted(found_endpoints):
         print(f"📍 {route}")

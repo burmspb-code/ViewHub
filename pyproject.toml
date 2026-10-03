@@ -11,7 +11,7 @@ dependencies = [
     "PyQt6 (>=6.11.0,<7.0.0)",
     "pandas (>=3.0.5,<4.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
-    "requests (>=2.34.2,<3.0.0)",
+    "requests[socks] (>=2.34.2,<3.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "beautifulsoup4 (>=4.15.0,<5.0.0)",
     "playwright (>=1.49.0,<2.0.0)",
@@ -24,6 +24,9 @@ dependencies = [
 
 [tool.poetry]
 package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+coverage = {allow-prereleases = true}
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -38,7 +41,8 @@ dev = [
     "pytest-cov (>=7.1.0,<8.0.0)",
     "tinycss2 (>=1.5.1,<2.0.0)",
     "requests-mock (>=1.12.1,<2.0.0)",
-    "pyinstaller (>=6.22.3,<7.0.0) ; python_version >= \"3.11\" and python_version < \"3.16\""
+    "pyinstaller (>=6.22.3,<7.0.0) ; python_version >= \"3.11\" and python_version < \"3.16\"",
+    "coverage (>=7.16.2,<8.0.0)"
 ]
 
 [tool.ruff]
@@ -93,6 +97,9 @@ quote-style = "double"
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 
 [tool.pytest.ini_options]
+# Настраиваем pytest: ищем тесты в папке tests, включаем покрытие для всего проекта
+testpaths = ["tests"]
+addopts = "--cov=. --cov-report=term-missing --cov-report=html"
 pythonpath = [
     ".",               # Корневая папка (чтобы находил parsers_config)
     "src"              # Папка исходников (чтобы импорты внутри src работали напрямую)
@@ -102,13 +109,23 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
+# Связываем покрытие со всем корнем проекта и конкретными источниками
+source = [".", "src"]
 omit = [
     "src/parsers_config/citadel_config.py",
     "src/parsers_config/gardarika_config.py",
+    "src/parsers/citadel_parser.py",
+    "src/parsers/gardarika_parser.py",
+    "src/extractors/gardarika_extractor.py",
+    "src/extractors/citadel_extractor.py",
     "src/scanners/async_scan_ep.py",
     "src/scanners/auto_blind_fuzzer.py",
     "src/scanners/scaner_api.py",
-    "src/scanners/scanner_new_v3.6.py"
+    "src/scanners/scanner_new_v3.6.py",
+    "tests/*",
+    "*/.venv/*",
+    "*/site-packages/*",
+    "main.py"
 ]
 
 [tool.coverage.report]

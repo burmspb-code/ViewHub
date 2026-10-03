@@ -3,6 +3,7 @@
 from typing import Dict, ClassVar
 from src.core.base_classes import BaseDBParsingConfig
 
+
 class GoldenAppleConfig(BaseDBParsingConfig):
     """
     Конфигурация для парсинга интернет-магазина Золотое Яблоко.

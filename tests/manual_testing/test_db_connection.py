@@ -118,7 +118,7 @@ def test_sqlite_manager_full_flow():
             raise ValueError(f"❌ Не удалось найти индекс колонки для проверки: {e}") from e
 
         # 4. Выбираем обновленные данные для проверки UPSERT
-        cursor.execute(f'SELECT * FROM "{table_name}" WHERE product_id = ?', (101,)) # noqa: S608
+        cursor.execute(f'SELECT * FROM "{table_name}" WHERE product_id = ?', (101,))  # noqa: S608
         row = cursor.fetchone()
         assert row is not None, "❌ Данные не найдены в таблице"
 

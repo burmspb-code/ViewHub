@@ -49,7 +49,6 @@ class GoldenAppleParser(BaseParser):
 
         return url
 
-
     def load_product_detail_page(self, context, product_url: str, product_id: str) -> Any:
         """
         Модуль 3 (СИНХРОННЫЙ ООП вариант): Открытие фоновой вкладки товара.
@@ -146,6 +145,7 @@ class GoldenAppleParser(BaseParser):
 
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
         """Запуск основного цикла парсинга."""
+
         def to_gui(msg: str):
             callback = getattr(self, "progress_callback", None)
             if callback is not None and callable(callback):
@@ -192,6 +192,7 @@ class GoldenAppleParser(BaseParser):
             # 2. АКТИВАЦИЯ ПОЛНОГО STEALTH-СЛЕПОК ЧЕРЕЗ БИБЛИОТЕКУ (ОСТАВЛЯЕМ)
             try:
                 from playwright_stealth import stealth_sync
+
                 stealth_sync(page)
                 to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
             except Exception as stealth_err:
@@ -250,9 +251,7 @@ class GoldenAppleParser(BaseParser):
                             # Если есть дубликаты, увеличиваем счетчик
                             old_duplicates_count += 1
 
-                    to_gui(
-                        f"📊 Обнаружено дубликатов в базе: {old_duplicates_count} из {len(item_id_list)}"
-                    )
+                    to_gui(f"📊 Обнаружено дубликатов в базе: {old_duplicates_count} из {len(item_id_list)}")
 
                     # Если есть дубликаты
                     if old_duplicates_count:
@@ -261,7 +260,6 @@ class GoldenAppleParser(BaseParser):
 
                     # Если на странице все товары уже есть в БД завершаем цикл
                     if len(item_id_list) == old_duplicates_count:
-
                         # --- Проверка на зацикливание парсинга ---
                         # Получаем максимальный номер страницы из БД
                         max_page_in_db = self.manager.get_last_page_number()
@@ -314,7 +312,7 @@ class GoldenAppleParser(BaseParser):
                             item["page_number"] = self.current_page
 
                             page_batch.append(item)
-                            self.manager.save([item]) # Передаем чистый список из одного товара
+                            self.manager.save([item])  # Передаем чистый список из одного товара
                             saved_in_page += 1
                             continue
                         # --------------------------
@@ -339,20 +337,22 @@ class GoldenAppleParser(BaseParser):
                         item["page_number"] = self.current_page
 
                         # ПОСТРОЧНАЯ ЗАПИСЬ
-                        self.manager.save([item]) # Передаем чистый список из одного товара
+                        self.manager.save([item])  # Передаем чистый список из одного товара
                         saved_in_page += 1
                         # --------------------------------------
 
                         page_batch.append(item)
 
                         if idx < total_in_batch:
-                            self._smart_sleep(random.uniform(1.5, 3.0)) # noqa: S311
+                            self._smart_sleep(random.uniform(1.5, 3.0))  # noqa: S311
 
                     # Отдаем пакет воркеру ТОЛЬКО для статистики
                     yield page_batch
 
-                    to_gui(f"🟢 Страница №{self.current_page} обработана.\n"
-                           f"💾 Сохранено {saved_in_page} из {total_in_batch} товаров.")
+                    to_gui(
+                        f"🟢 Страница №{self.current_page} обработана.\n"
+                        f"💾 Сохранено {saved_in_page} из {total_in_batch} товаров."
+                    )
 
                     # Увеличиваем счетчик страницы ТОЛЬКО после полной обработки текущей
                     self.current_page += 1
@@ -363,7 +363,7 @@ class GoldenAppleParser(BaseParser):
                 raise e
             finally:
                 # Корректная очистка ресурсов: сначала страница, потом контекст
-                if 'page' in locals() and not page.is_closed():
+                if "page" in locals() and not page.is_closed():
                     page.close()
-                if 'context' in locals():
+                if "context" in locals():
                     context.close()

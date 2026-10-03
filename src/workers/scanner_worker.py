@@ -14,8 +14,9 @@ class ScannerWorker(QObject):
     """
     Универсальный рабочий поток PyQt6 для работы с объектами сканеров.
     """
+
     # Определение сигналов для взаимодействия с главным UI-потоком
-    progress_signal = pyqtSignal(str)     # Статус выполнения для GUI (например, "Обработано 5/100")
+    progress_signal = pyqtSignal(str)  # Статус выполнения для GUI (например, "Обработано 5/100")
     finished_signal = pyqtSignal(object)  # Сигнал завершения (передает финальные данные или None)
 
     def __init__(self, scaner: "BaseScanner"):

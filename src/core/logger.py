@@ -13,6 +13,7 @@ class LogSignals(QObject):
     """
     Контейнер сигналов Qt для потокобезопасной передачи логов.
     """
+
     append_log = pyqtSignal(str)
 
 

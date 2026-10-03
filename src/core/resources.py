@@ -25,8 +25,5 @@ def load_app_icon() -> QIcon:
         logger.info("Файл иконки успешно найден и загружен.")
         return QIcon(str(icon_path))
 
-    logger.warning(
-        f"Файл иконки не найден по пути: {icon_path}. "
-        f"Будет использована системная иконка по умолчанию."
-    )
+    logger.warning(f"Файл иконки не найден по пути: {icon_path}. Будет использована системная иконка по умолчанию.")
     return QIcon()

@@ -56,7 +56,7 @@ class DatabaseManager(BaseDataBase):
         # В SQLite считаем СИМВОЛЫ, а не байты
         if len(table_name) > self.MAX_IDENTIFIER_LENGTH:
             # 20 символов хэша гарантируют уникальность
-            hash_suffix = hashlib.md5(table_name.encode("utf-8")).hexdigest()[:20] # noqa: S324
+            hash_suffix = hashlib.md5(table_name.encode("utf-8")).hexdigest()[:20]  # noqa: S324
 
             # Высчитываем доступное место под базовое имя в символах (63 - 20 - 1 = 42)
             max_base_len = self.MAX_IDENTIFIER_LENGTH - len(hash_suffix) - 1

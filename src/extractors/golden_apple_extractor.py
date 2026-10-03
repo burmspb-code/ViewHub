@@ -7,6 +7,7 @@ from src.core.base_classes import BaseExtractor, BaseDBParsingConfig
 
 logger = logging.getLogger(__name__)
 
+
 class GoldenAppleExtractor(BaseExtractor):
     """Extractor для сайта Цитадель (адаптирован под Золотое Яблоко)."""
 
@@ -55,11 +56,7 @@ class GoldenAppleExtractor(BaseExtractor):
                             country_of_origin = country_clean.capitalize()
                             break
 
-        return {
-            "description": description,
-            "usage": usage,
-            "country_of_origin": country_of_origin
-        }
+        return {"description": description, "usage": usage, "country_of_origin": country_of_origin}
 
     def _parse_single_card(self, card_soup: BeautifulSoup, category_slug: str) -> Dict[str, Any] | None:
         """Внутренний приватный метод для разбора одной конкретной карточки листинга."""
@@ -83,7 +80,7 @@ class GoldenAppleExtractor(BaseExtractor):
                 product_url = href
             else:
                 clean_href = href.strip("/")
-                product_url = f"https://goldapple.ru{clean_href}/" if clean_href else ""
+                product_url = f"https://goldapple.ru/{clean_href}/" if clean_href else ""
 
             # 3. Извлечение БРЕНДА и НАЗВАНИЯ товара
             brand_tag = card_soup.find(class_=lambda x: x and "product-card-name__brand" in x)

@@ -1,9 +1,6 @@
 import pytest
 import sqlite3
 
-from types import SimpleNamespace # Класс заглушка
-
-from core.base_classes import BaseDBParsingConfig
 from src.database.sqlite_manager import DatabaseManager
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 
@@ -20,11 +17,13 @@ def db_manager(tmp_path):
 
     return MockDataBaseManager(db_path=test_db_file)
 
+
 @pytest.fixture
 def config_db():
     """Формирует объект конфигурации с нужными атрибутами."""
     # Возвращаем реальный конфигурационный объект
     return GoldenAppleConfig
+
 
 @pytest.fixture
 def system_shema():
@@ -34,6 +33,7 @@ def system_shema():
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "session_id": "TEXT NOT NULL",
     }
+
 
 @pytest.fixture
 def business_shema():
@@ -57,6 +57,7 @@ def business_shema():
         "page_number": "INTEGER",
     }
 
+
 @pytest.fixture
 def create_table_sql():
     return """CREATE TABLE IF NOT EXISTS goldapple_ru_parfjumerija_novinki (
@@ -78,9 +79,11 @@ def create_table_sql():
         page_number INTEGER
 );"""
 
+
 def test_connect(db_manager):
     """Проверяет, что соединение с БД установлено"""
     assert db_manager._connect() is not None
+
 
 def test_make_table_name(db_manager, config_db):
     """Проверяет, что имя таблицы формируется корректно"""

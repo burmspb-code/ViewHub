@@ -27,7 +27,7 @@ from src.services import (
     parsing_on_click,
     parsing_preview_on_click,
     close_db_viewer,
-    create_db_viewer
+    create_db_viewer,
 )
 
 
@@ -107,8 +107,6 @@ def test_parsing_db_read_success(setup_temporary_db):
     assert df.iloc[0]["name"] == "Помада Golden Apple"
 
 
-
-
 @pytest.mark.filterwarnings("ignore:unclosed database:ResourceWarning")
 def test_parsing_db_read_empty_table(setup_temporary_db):
     """Проверяем поведение функции, если таблица в БД оказалась пустой."""
@@ -133,9 +131,7 @@ def test_parsing_db_read_empty_table(setup_temporary_db):
 
     # Базовые проверки логики функции
     assert df is None
-    mock_obj.result_display.append.assert_called_once_with(
-        "⚠️ База данных пуста, нечего экспортировать."
-    )
+    mock_obj.result_display.append.assert_called_once_with("⚠️ База данных пуста, нечего экспортировать.")
 
     # === РЕШЕНИЕ ДЛЯ PYTHON 3.14: Принудительно очищаем скрытые ресурсы Pandas/SQLite ===
     del df  # Уничтожаем пустой DataFrame, освобождая ссылки
@@ -204,6 +200,7 @@ def test_parsing_file_save_permission_error(sample_dataframe, tmp_path, monkeypa
         "❌ Ошибка доступа: Файл занят другой программой (например, Excel). Закройте его и повторите попытку."
     )
 
+
 def test_parsing_db_read_missing_db_path():
     """Проверяем поведение функции, если в парсере отсутствует путь к БД."""
     # Создаем мок-парсер, у которого db_path возвращает None или пустую строку
@@ -221,9 +218,7 @@ def test_parsing_db_read_missing_db_path():
     # ПРОВЕРКИ:
     assert df is None
     # Проверяем, что в интерфейс вывелась правильная ошибка с крестиком ❌
-    mock_obj.result_display.append.assert_called_once_with(
-        "❌ Ошибка: не найден файл базы данных."
-    )
+    mock_obj.result_display.append.assert_called_once_with("❌ Ошибка: не найден файл базы данных.")
 
 
 def test_parsing_db_read_missing_table_name():
@@ -240,9 +235,8 @@ def test_parsing_db_read_missing_table_name():
     # ПРОВЕРКИ:
     assert df is None
     # Проверяем, что в интерфейс вывелось предупреждение с треугольником ⚠️
-    mock_obj.result_display.append.assert_called_once_with(
-        "⚠️ Ошибка: имя таблицы не задано."
-    )
+    mock_obj.result_display.append.assert_called_once_with("⚠️ Ошибка: имя таблицы не задано.")
+
 
 def test_parsing_db_read_exception_handling(setup_temporary_db, monkeypatch):
     """Проверяем перехват исключений и вывод ошибки в UI при сбое чтения БД."""
@@ -268,6 +262,7 @@ def test_parsing_db_read_exception_handling(setup_temporary_db, monkeypatch):
     mock_obj.result_display.append.assert_called_once_with(
         "❌ Ошибка чтения БД: Сбой чтения структуры таблицы или диск заблокирован"
     )
+
 
 def test_update_parsing_status():
     """Проверяем, что сообщение корректно добавляется в result_display."""
@@ -326,6 +321,7 @@ def test_stop_handler_missing_buttons_safe():
     # Логи всё равно должны записаться
     mock_obj.result_display.append.assert_any_call("🛑 Процесс остановлен!")
     mock_obj.result_display.append.assert_any_call("Тест без кнопок")
+
 
 def test_parsing_success_handler_with_file():
     """Проверяем успешный хэндлер, когда передан путь к файлу результатов."""
@@ -386,6 +382,7 @@ def test_parsing_success_handler_missing_buttons_safe():
     # Текст успеха при этом всё равно выведется в консоль UI
     mock_obj.result_display.append.assert_any_call("🎉 Успех!")
 
+
 def test_scanning_success_handler_none_result():
     """Проверяем поведение хэндлера, если результат сканирования равен None."""
     mock_obj = MagicMock()
@@ -443,9 +440,6 @@ def test_scanning_success_handler_missing_buttons_safe():
 
     # Информационные сообщения при этом успешно добавляются в лог
     mock_obj.result_display.append.assert_any_call("🔹 Успех")
-
-
-
 
 
 def test_auth_on_click_missing_fields():
@@ -1132,6 +1126,7 @@ def test_close_db_viewer_already_closed():
     mock_obj.result_display.show.assert_not_called()
     mock_obj.btn_preview_parsing.setEnabled.assert_not_called()
 
+
 def test_create_db_viewer_empty_table(monkeypatch, qtbot, tmp_path):
     """Проверяем, что если таблица в БД пуста, функция возвращает None и пишет в UI."""
     mock_obj = MagicMock()
@@ -1155,10 +1150,7 @@ def test_create_db_viewer_success(monkeypatch, qtbot, tmp_path):
     mock_obj = MagicMock()
 
     # Готовим тестовые данные (2 строки, 2 колонки)
-    test_df = pd.DataFrame({
-        "ID": [1,2],
-        "Название": ["Товар А", "Товар Б"]
-    })
+    test_df = pd.DataFrame({"ID": [1, 2], "Название": ["Товар А", "Товар Б"]})
 
     # Создаем путь во временной папке pytest (он удалится автоматически)
     temp_db_file = str(tmp_path / "test_products.db")

@@ -21,7 +21,6 @@ class CitadelParser(BaseParser):
             url += f"&PAGEN_2={page}"
         return url
 
-
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
         """Пошагово возвращает списки словарей с данными (постранично)."""
         current_page = 1

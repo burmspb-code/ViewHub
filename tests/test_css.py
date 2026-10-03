@@ -1,5 +1,6 @@
 import pytest
 import tinycss2
+
 # Импортируем ваш модуль со стилями
 import src.core.styles as styles
 

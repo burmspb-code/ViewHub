@@ -5,6 +5,7 @@ from PyQt6.QtGui import QIcon
 
 from src.core.resources import load_app_icon
 
+
 @pytest.mark.usefixtures("qapp")
 def test_load_app_icon_success(monkeypatch, caplog):
     """Проверяет успешную загрузку иконки, если файл существует на диске."""
@@ -17,6 +18,7 @@ def test_load_app_icon_success(monkeypatch, caplog):
     assert isinstance(icon, QIcon)
     # Проверяем, что в caplog.text попала нужная строка
     assert "Файл иконки успешно найден и загружен." in caplog.text
+
 
 @pytest.mark.usefixtures("qapp")
 def test_load_app_icon_not_found(monkeypatch, caplog):

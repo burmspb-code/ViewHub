@@ -9,7 +9,7 @@ from parsers_config.golden_apple_config import GoldenAppleConfig
 
 
 def test_key_and_schema():
-    #config = BaseConfig("url", "key", "file")
+    # config = BaseConfig("url", "key", "file")
     config = GoldenAppleConfig("https://goldapple.ru", "духи", "test")
 
     schema = config.get_full_schema()

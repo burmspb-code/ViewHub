@@ -67,7 +67,7 @@ class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переиме
                 "product_code": code,
                 "product_availability": availability,
                 "product_packaging": packaging,
-                "product_url": url
+                "product_url": url,
             }
 
             # Шаг 5. Добавляем в итоговый список

@@ -32,6 +32,7 @@ API_PATH_MARKER = "/api/"
 # Маркер для административного пути
 ADMIN_PATH = "/admin/"
 
+
 def extract_api_hints(html_text):
     """Ищет скрытые текстовые зацепки и пути в HTML-разметке сайта."""
     hints = set()
@@ -39,13 +40,14 @@ def extract_api_hints(html_text):
     for path in raw_paths:
         if any(marker in path for marker in [API_PATH_MARKER, "/v1/", "/v2/", "/auth/", "/login", "/admin", "/users"]):
             # Забираем только чистую строку пути до знака вопроса
-            hints.add(path.split('?')[0])
+            hints.add(path.split("?")[0])
     return hints
+
 
 def is_static_file(path: str) -> bool:
     """Проверяет, является ли путь медиа-файлом или стилем."""
-    ignored_extensions = ('.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2')
-    return path.lower().endswith(ignored_extensions) or '/static/' in path.lower()
+    ignored_extensions = (".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2")
+    return path.lower().endswith(ignored_extensions) or "/static/" in path.lower()
 
 
 def _generate_web_routes(app, web_actions, routes):
@@ -77,30 +79,72 @@ def generate_universal_express_wordlist(detected_apps=None) -> list:
 
     # 1. Действия и суффиксы для веб-интерфейса (HTML-страницы и формы)
     web_actions = [
-        "register", "email-confirmation-sent", "login", "logout",
-        "password-reset", "password-reset/done", "password-reset/complete",
-        "create-api", "update-api", "delete-api", "add", "create", "edit", "update", "delete",
-        "bookmark/add", "bookmark/update-api", "task/create-api", "task/update-api", "task/delete-api"
+        "register",
+        "email-confirmation-sent",
+        "login",
+        "logout",
+        "password-reset",
+        "password-reset/done",
+        "password-reset/complete",
+        "create-api",
+        "update-api",
+        "delete-api",
+        "add",
+        "create",
+        "edit",
+        "update",
+        "delete",
+        "bookmark/add",
+        "bookmark/update-api",
+        "task/create-api",
+        "task/update-api",
+        "task/delete-api",
     ]
 
     # 2. Суффиксы для глубокого пробива REST API / JWT
     api_auth_endpoints = [
-        "auth/login", "auth/token/refresh", "auth/logout",
-        "register", "email-verify", "me", "list", "all", "view",
-        "password-reset", "password-reset/confirm"
+        "auth/login",
+        "auth/token/refresh",
+        "auth/logout",
+        "register",
+        "email-verify",
+        "me",
+        "list",
+        "all",
+        "view",
+        "password-reset",
+        "password-reset/confirm",
     ]
 
     # 3. Список сущностей для построения вложенных REST-путей (Мировой стандарт)
     entities = [
-        "user", "users", "me", "profile", "account", "token", "session",
-        "task", "tasks", "bookmark", "bookmarks", "catalog", "product", "products",
-        "category", "categories", "cart", "order", "orders", "item", "items", "post", "posts"
+        "user",
+        "users",
+        "me",
+        "profile",
+        "account",
+        "token",
+        "session",
+        "task",
+        "tasks",
+        "bookmark",
+        "bookmarks",
+        "catalog",
+        "product",
+        "products",
+        "category",
+        "categories",
+        "cart",
+        "order",
+        "orders",
+        "item",
+        "items",
+        "post",
+        "posts",
     ]
 
     # Гарантированные базовые системные пути
-    routes = [
-        ADMIN_PATH, "/login/", "/register/", "/catalog/", "/contacts/", "/openapi.json", "/swagger.json"
-    ]
+    routes = [ADMIN_PATH, "/login/", "/register/", "/catalog/", "/contacts/", "/openapi.json", "/swagger.json"]
 
     if detected_apps:
         for app in detected_apps:
@@ -139,7 +183,7 @@ async def test_single_path(client, target_url, path_clean, valid_endpoints, sema
         return
 
     # Жесткая и надежная склейка хоста и пути
-    base_host = target_url.rstrip('/')
+    base_host = target_url.rstrip("/")
     pure_path = f"/{path_clean.lstrip('/')}"
     full_test_url = f"{base_host}{pure_path}"
 
@@ -183,7 +227,7 @@ def print_progress_bar(current, total, bar_length=30):
 
 def _append_to_display(obj, message):
     """Helper to safely append messages to result display."""
-    if hasattr(obj, 'result_display') and obj.result_display:
+    if hasattr(obj, "result_display") and obj.result_display:
         obj.result_display.append(message)
 
 
@@ -191,7 +235,7 @@ def _discover_api_markers(raw_discovered_paths):
     """Extract API markers from discovered paths."""
     discovered_api_markers = set()
     for path in raw_discovered_paths:
-        api_matches = re.findall(r'(api|v\d+)', path.lower())
+        api_matches = re.findall(r"(api|v\d+)", path.lower())
         if api_matches:
             discovered_api_markers.update(api_matches)
     return discovered_api_markers
@@ -218,8 +262,7 @@ async def _probe_api_structure(client, target_url, obj):
         return {"api", "v1"}
     else:
         _append_to_display(
-            obj,
-            "[ℹ️] Зондирование завершено: Скрытая REST-архитектура отсутствует. Переход в WEB-режим."
+            obj, "[ℹ️] Зондирование завершено: Скрытая REST-архитектура отсутствует. Переход в WEB-режим."
         )
         return set()
 
@@ -227,8 +270,20 @@ async def _probe_api_structure(client, target_url, obj):
 def _generate_crud_matrix(detected_apps, wordlist):
     """Generate flat CRUD matrix for detected applications."""
     crud_actions = [
-        "", "list", "all", "view", "detail", "catalog", "contacts",
-        "add", "create", "new", "edit", "update", "delete", "remove"
+        "",
+        "list",
+        "all",
+        "view",
+        "detail",
+        "catalog",
+        "contacts",
+        "add",
+        "create",
+        "new",
+        "edit",
+        "update",
+        "delete",
+        "remove",
     ]
 
     for app in detected_apps:
@@ -338,7 +393,7 @@ def _extract_paths_from_html(response_text, wordlist, raw_discovered_paths):
     raw_discovered_paths.update(hints)
 
     for a in soup.find_all("a", href=True):
-        href = str(a["href"]).split('?')[0]
+        href = str(a["href"]).split("?")[0]
         if href.startswith("/"):
             wordlist.append(href)
             raw_discovered_paths.add(href)
@@ -363,7 +418,7 @@ def _clean_and_normalize_paths(wordlist):
     raw_clean = set()
     for p in wordlist:
         if p and not is_static_file(p):
-            stripped = p.strip('/')
+            stripped = p.strip("/")
             raw_clean.add(f"/{stripped}/" if stripped else "/")
 
     clean_paths = sorted(raw_clean)
@@ -374,7 +429,7 @@ def _clean_and_normalize_paths(wordlist):
 def _update_progress_bar(obj, completed_count, total_tasks):
     """Update the progress bar in the UI."""
     if completed_count % 10 == 0 or completed_count == total_tasks:
-        if hasattr(obj, 'result_display') and obj.result_display:
+        if hasattr(obj, "result_display") and obj.result_display:
             cursor = obj.result_display.textCursor()
             cursor.movePosition(cursor.MoveOperation.End)
             cursor.select(cursor.SelectionType.LineUnderCursor)
@@ -386,8 +441,7 @@ def _update_progress_bar(obj, completed_count, total_tasks):
             padding = int(bar_length - len(arrow)) * "░"
             percent = int(fraction * 100)
             progress_text = (
-                f"[📡] Прогресс сканирования: [{arrow}{padding}] {percent}% "
-                f"({completed_count}/{total_tasks})"
+                f"[📡] Прогресс сканирования: [{arrow}{padding}] {percent}% ({completed_count}/{total_tasks})"
             )
 
             cursor.insertText(progress_text)
@@ -426,10 +480,9 @@ def _display_results_table(sorted_results, obj):
     msg_success = f"\n[🎉] Сканирование успешно завершено! В таблице отображено целей: {len(sorted_results)}"
     line_equal = "=" * 75
     line_dash = "-" * 75
-    header_text = (f"{'№':<3} | {'ТИП':<5} | {'КОД':<5} | {'ПОЯСНЕНИЕ':<18} |"
-                   f" {'ЭНДПОИНТ ДЛЯ ТЕСТИРОВАНИЯ БЕЗОПАСНОСТИ'}")
+    header_text = f"{'№':<3} | {'ТИП':<5} | {'КОД':<5} | {'ПОЯСНЕНИЕ':<18} | {'ЭНДПОИНТ ДЛЯ ТЕСТИРОВАНИЯ БЕЗОПАСНОСТИ'}"
 
-    if hasattr(obj, 'result_display') and obj.result_display:
+    if hasattr(obj, "result_display") and obj.result_display:
         obj.result_display.append("")
         obj.result_display.append(msg_success)
         obj.result_display.append(line_equal)
@@ -440,10 +493,10 @@ def _display_results_table(sorted_results, obj):
         note = _get_status_note(status)
         row_text = f"{index:<3} | {marker:<5} | {status:<5} | {note:<18} | {path}"
 
-        if hasattr(obj, 'result_display') and obj.result_display:
+        if hasattr(obj, "result_display") and obj.result_display:
             obj.result_display.append(row_text)
 
-    if hasattr(obj, 'result_display') and obj.result_display:
+    if hasattr(obj, "result_display") and obj.result_display:
         obj.result_display.append(line_equal)
 
 
@@ -471,7 +524,7 @@ async def main_async_scan(obj, target_url, output_json_path):
         detected_apps = _collect_detected_apps(wordlist)
 
         # Вывод зацепок в графическое окно PyQt/PySide
-        if hasattr(obj, 'result_display') and obj.result_display:
+        if hasattr(obj, "result_display") and obj.result_display:
             if discovered_api_markers:
                 obj.result_display.append(f"[🧠] Активные API-маркеры матрицы: {list(discovered_api_markers)}")
             if detected_apps:
@@ -515,7 +568,7 @@ async def main_async_scan(obj, target_url, output_json_path):
             percent = int(fraction * 100)
             return f"[📡] Прогресс сканирования: [{arrow}{padding}] {percent}% ({current}/{total})"
 
-        if hasattr(obj, 'result_display') and obj.result_display:
+        if hasattr(obj, "result_display") and obj.result_display:
             obj.result_display.append(get_ui_progress_text(completed_count, total_tasks))
 
         for future in asyncio.as_completed(tasks):
@@ -525,14 +578,16 @@ async def main_async_scan(obj, target_url, output_json_path):
 
         # === КОНЕЦ ЦИКЛА (Сканирование успешно завершено!) ===
 
-        msg_finished = (f"[📊] Сетевой движок завершил работу. Сырое множество содержит:"
-                        f" {len(valid_endpoints)} элементов.")
+        msg_finished = (
+            f"[📊] Сетевой движок завершил работу. Сырое множество содержит: {len(valid_endpoints)} элементов."
+        )
         _append_to_display(obj, msg_finished)
 
         sorted_results = sorted(valid_endpoints, key=lambda x: (x, x))
         _save_results_to_json(sorted_results, output_json_path, obj)
 
         _display_results_table(sorted_results, obj)
+
 
 def run_security_api_scan(obj, output_json_path=None):
     """Синхронный инициализатор асинхронного ядра."""
@@ -542,7 +597,7 @@ def run_security_api_scan(obj, output_json_path=None):
 
     obj.result_display.append("[🔄] Инициализация УНИВЕРСАЛЬНОГО ЭКСПРЕСС-ФАЗЗЕРА...")
 
-    target_url = obj.base_url_input.text() # Базовый путь для сканирования
+    target_url = obj.base_url_input.text()  # Базовый путь для сканирования
 
     asyncio.run(main_async_scan(obj, target_url, output_json_path))
 
