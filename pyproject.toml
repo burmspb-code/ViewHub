@@ -5,6 +5,7 @@ description = ""
 authors = [
     {name = "Mikhail Burdukovsky", email = "burmspb@gmail.com"}
 ]
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
