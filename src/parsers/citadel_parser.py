@@ -5,8 +5,8 @@ from typing import Any, Dict, Generator, List
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
-from exceptions import ExceptionStopParser
-from parser_classes import BaseParser
+from my_exceptions.exceptions import ExceptionStopParser
+from src.core.base_classes import BaseParser
 
 
 class CitadelParser(BaseParser):
@@ -20,7 +20,6 @@ class CitadelParser(BaseParser):
         if page > 1:
             url += f"&PAGEN_2={page}"
         return url
-
 
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
         """Пошагово возвращает списки словарей с данными (постранично)."""

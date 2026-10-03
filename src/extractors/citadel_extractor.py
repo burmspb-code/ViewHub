@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from parser_classes import BaseConfig, BaseExtractor
+from src.core.base_classes import BaseConfig, BaseExtractor
 
 
 class CitadelExtractor(BaseExtractor):

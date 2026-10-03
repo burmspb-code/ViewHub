@@ -3,24 +3,31 @@ name = "viewhub"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Mikhail Burdukovsky",email = "burmspb@gmail.com"}
+    {name = "Mikhail Burdukovsky", email = "burmspb@gmail.com"}
 ]
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pyqt6 (>=6.11.0,<7.0.0)",
+    "PyQt6 (>=6.11.0,<7.0.0)",
     "pandas (>=3.0.5,<4.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
-    "requests (>=2.34.2,<3.0.0)",
+    "requests[socks] (>=2.34.2,<3.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "beautifulsoup4 (>=4.15.0,<5.0.0)",
     "playwright (>=1.49.0,<2.0.0)",
     "lxml (>=6.1.3,<7.0.0)",
-    "aiohttp (>=3.14.3,<4.0.0)"
+    "aiohttp (>=3.14.3,<4.0.0)",
+    "curl-cffi (>=0.16.3,<0.17.0)",
+    "playwright-stealth (>=2.0.3,<3.0.0)",
+    "python-dotenv (>=1.2.3,<2.0.0)"
 ]
 
 [tool.poetry]
 package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+coverage = {allow-prereleases = true}
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -28,14 +35,21 @@ build-backend = "poetry.core.masonry.api"
 
 [dependency-groups]
 dev = [
-    "ruff (>=0.16.6,<0.17.0)"
+    "ruff (>=0.16.6,<0.17.0)",
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-qt (>=4.5.0,<5.0.0)",
+    "pytest-mock (>=3.16.0,<4.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "tinycss2 (>=1.5.1,<2.0.0)",
+    "requests-mock (>=1.12.1,<2.0.0)",
+    "pyinstaller (>=6.22.3,<7.0.0) ; python_version >= \"3.11\" and python_version < \"3.16\"",
+    "coverage (>=7.16.2,<8.0.0)"
 ]
 
 [tool.ruff]
-# Минимально необходимая версия Ruff (хорошая практика для фиксации окружения)
 required-version = ">=0.5.0"
 
-# Список исключений: папки окружения, миграции и ваш settings.py
+# Папки, которые Ruff вообще не будет сканировать
 exclude = [
     ".git",
     ".venv",
@@ -43,14 +57,12 @@ exclude = [
     "env",
     "__pycache__",
     "**/migrations/*.py",
-    # Укажите точный путь к вашему settings.py от корня проекта:
     "config/settings.py",
 ]
 line-length = 120
 
 # Настройки линтера (анализатора кода)
 [tool.ruff.lint]
-# Стандартный набор правил для профессионального Django-проекта
 select = [
     "E",   # Ошибки стиля кода (pycodestyle errors)
     "W",   # Предупреждения стиля кода (pycodestyle warnings)
@@ -62,20 +74,67 @@ select = [
     "RUF", # Собственные полезные правила разработчиков Ruff
 ]
 
-# Правила, которые мы сознательно отключаем (если нужно)
 ignore = [
-    "S101",   # Разрешаем использовать assert в тестах
+    "S101",   # Разрешаем использовать assert глобально
     "RUF001", # Игнорировать русскую раскладку в самом коде
     "RUF002", # Игнорировать русскую раскладку в докстрингах
     "RUF003", # Игнорировать русскую раскладку в комментариях (#)
     "I001",   # Игнорировать проблемы с неразрешёнными импортами (для PyQt6)
 ]
 
+# ЖЕЛЕЗОБЕТОННЫЙ ФИЛЬТР ДЛЯ ТЕСТОВ: Ruff закроет глаза на все специфичные правила в папке tests
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S105",    # Игнорировать предупреждения о "зашитых токенах" (auth_token = "token")
+    "S106",    # Игнорировать зашитые пароли в аргументах функций в тестах
+    "SLF001",  # Разрешаем приватные вызовы и импорты (_handler, _update_status)
+    "PLR2004", # Разрешаем "магические числа" в ассертах тестов (например, assert len(df) == 2)
+]
+
 [tool.ruff.format]
 quote-style = "double"
 
-# Настройки для автоматической сортировки импортов (секция I)
 [tool.ruff.lint.isort]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
-# Укажите через запятую имена всех ваших Django-приложений в проекте:
-# known-first-party = ["routines", "users"]
+
+[tool.pytest.ini_options]
+# Настраиваем pytest: ищем тесты в папке tests, включаем покрытие для всего проекта
+testpaths = ["tests"]
+addopts = "--cov=. --cov-report=term-missing --cov-report=html"
+pythonpath = [
+    ".",               # Корневая папка (чтобы находил parsers_config)
+    "src"              # Папка исходников (чтобы импорты внутри src работали напрямую)
+]
+filterwarnings = [
+    "ignore:unclosed database:ResourceWarning"
+]
+
+[tool.coverage.run]
+# Связываем покрытие со всем корнем проекта и конкретными источниками
+source = [".", "src"]
+omit = [
+    "src/parsers_config/citadel_config.py",
+    "src/parsers_config/gardarika_config.py",
+    "src/parsers/citadel_parser.py",
+    "src/parsers/gardarika_parser.py",
+    "src/extractors/gardarika_extractor.py",
+    "src/extractors/citadel_extractor.py",
+    "src/scanners/async_scan_ep.py",
+    "src/scanners/auto_blind_fuzzer.py",
+    "src/scanners/scaner_api.py",
+    "src/scanners/scanner_new_v3.6.py",
+    "tests/*",
+    "*/.venv/*",
+    "*/site-packages/*",
+    "main.py"
+]
+
+[tool.coverage.report]
+# Указываем регулярные выражения для строк, которые не нужно учитывать
+exclude_also = [
+    "def __repr__",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    '\\s*@abstractmethod',      # Игнорировать декоратор @abstractmethod
+    '\\s*@abc.abstractmethod',  # Игнорировать декоратор @abc.abstractmethod
+]

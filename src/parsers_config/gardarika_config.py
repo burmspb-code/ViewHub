@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from parser_classes import BaseConfig
+from src.core.base_classes import BaseConfig
 
 
 class GardarikaConfig(BaseConfig):
@@ -16,15 +16,13 @@ class GardarikaConfig(BaseConfig):
         if config is None:
             config = {
                 "table_selector": "div.products-table",  # Селектор таблицы с товарами
-                "card_selector": "tr",                   # Селектор карточки (строки таблицы)
-
+                "card_selector": "tr",  # Селектор карточки (строки таблицы)
                 # Исправлено на "code_keywords" для точной стыковки с вашим Extractor-ом
                 "code_keywords": ["alt", "art", "articul", "sku", "number", "Арт"],
-
-                "name": "_blank",                        # Поле наименования товара
-                "product_link": "link",                  # Селектор ссылки на товар
-                "quantity_package": "quantity",          # Поле количества в упаковке
-                "price_keywords": ["price", "cost", "цена", "стоимость"], # Ключевые слова для поиска цены
+                "name": "_blank",  # Поле наименования товара
+                "product_link": "link",  # Селектор ссылки на товар
+                "quantity_package": "quantity",  # Поле количества в упаковке
+                "price_keywords": ["price", "cost", "цена", "стоимость"],  # Ключевые слова для поиска цены
             }
 
         # Явно вызываем конструктор базового класса

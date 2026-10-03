@@ -1,24 +1,21 @@
 """Главный модуль запуска приложения."""
+
+import sys
 import logging
-# СРАЗУ настраиваем базовый уровень для root логгера
-from src.core.logger import setup_logger
-setup_logger(name="", level=logging.INFO)
 
-# Только ТЕПЕРЬ импортируем всё остальное.
-# Все модули гарантированно увидят уже готовый root-логгер с нужным уровнем!
-import sys # noqa: E402
-import traceback # noqa: E402
+# Импортируем пакет src. В этот момент автоматически загрузится .env
+# и настроится логгер ДО того, как импортируется PyQt и MainWindow.
+import src  # noqa: F401
 
-from PyQt6.QtWidgets import QApplication # noqa: E402
-
-from src.windows_pq import MainWindow # noqa: E402
+from PyQt6.QtWidgets import QApplication
+from src.windows_pq import MainWindow
 
 
 def log_uncaught_exceptions(ex_cls, ex, tb):
-    """Перехватывает любые ошибки PyQt и выводит их в консоль."""
-    text = "".join(traceback.format_exception(ex_cls, ex, tb))
-    print("!!! КРИТИЧЕСКАЯ ОШИБКА ПРИЛОЖЕНИЯ !!!\n", text)
+    """Перехватывает любые невыловленные ошибки и пишет их в логгер."""
+    logging.critical("!!! КРИТИЧЕСКАЯ ОШИБКА ПРИЛОЖЕНИЯ !!!", exc_info=(ex_cls, ex, tb))
     sys.exit(1)
+
 
 # Регистрируем глобальный перехватчик ошибок
 sys.excepthook = log_uncaught_exceptions

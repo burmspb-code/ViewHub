@@ -32,17 +32,18 @@ from src.core.styles import (
     SUBMIT_BUTTON_STYLE,
     CANCEL_BUTTON_STYLE,
     TOGGLE_PWD_VISIBILITY_STYLE,
+    EXPORT_BUTTON_STYLE,
+    PREVIEW_BUTTON_STYLE,
 )
-from src.services import (
-    auth_on_click,
-    parsing_on_click,
-    parsing_cancel_on_click,
-    request_on_click,
-    scanning_on_click,
-    scanning_cancel_on_click,
-)
+from src.service_modules.auth_service import auth_on_click, request_on_click
+from src.service_modules.parsing_service import parsing_on_click, parsing_cancel_on_click
+from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
+from src.service_modules.export_service import parsing_export_on_click
+from src.service_modules.db_viewer_service import parsing_preview_on_click
+
 
 logger = logging.getLogger(__name__)
+
 
 class MainWindow(QWidget):
     """
@@ -87,6 +88,7 @@ class MainWindow(QWidget):
         # Элементы полей настроек (для примера предустановок)
         self.timeout_input = None
         self.btn_save_settings = None
+        self.proxy_url = None
 
         # Навигация сканирования
         self.btn_scanning_menu = None
@@ -104,6 +106,8 @@ class MainWindow(QWidget):
         self.btn_parsing_menu = None
         self.key_word_input = None
         self.btn_cancel_parsing = None
+        self.btn_export_parsing = None
+        self.btn_preview_parsing = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -118,6 +122,7 @@ class MainWindow(QWidget):
 
         self.result_display = None
         self.zone2 = None
+        self.db_viewer = None  # Виджет для просмотра таблицы БД
 
         self.zone3 = None
         self.log_display = None
@@ -126,10 +131,12 @@ class MainWindow(QWidget):
         self.auth_token = None
         self.base_url = None
 
+        # Для экспорта данных парсинга
+        self.parser = None
+
         # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
         self.init_ui()
         self.connect_signals()
-
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
@@ -166,7 +173,7 @@ class MainWindow(QWidget):
         menu_layout.setContentsMargins(0, 0, 0, 0)
         menu_layout.setSpacing(12)
 
-        lbl_title = QLabel("МЕНЮ ДЕЙСТВИЙ")
+        lbl_title = QLabel("МЕНЮ")
         lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #94a3b8; letter-spacing: 1px;")
         menu_layout.addWidget(lbl_title)
 
@@ -180,12 +187,12 @@ class MainWindow(QWidget):
         self.btn_request_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_request_menu)
 
-        self.btn_scanning_menu = QPushButton("📡  СКАНИРОВАНИЕ")
+        self.btn_scanning_menu = QPushButton("💀  СКАНИРОВАНИЕ")
         self.btn_scanning_menu.setMinimumHeight(45)
         self.btn_scanning_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_scanning_menu)
 
-        self.btn_parsing_menu = QPushButton("🤖  ПАРСИНГ")
+        self.btn_parsing_menu = QPushButton("👽 ПАРСИНГ")
         self.btn_parsing_menu.setMinimumHeight(45)
         self.btn_parsing_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_parsing_menu)
@@ -337,14 +344,14 @@ class MainWindow(QWidget):
         self.target_url_input = QLineEdit()
         # self.target_url_input.setPlaceholderText("https://target-url")
         # Предустанавливаем значение вместо плейсхолдера
-        self.target_url_input.setText("https://citadel2000.ru/")
+        self.target_url_input.setText("https://goldapple.ru/")
         # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
         self.target_url_input.setReadOnly(True)
         self.target_url_input.setFixedHeight(35)
         parsing_layout.addWidget(self.target_url_input)
         parsing_layout.addSpacing(5)
 
-        parsing_layout.addWidget(QLabel("Ключевая фраза:"))
+        parsing_layout.addWidget(QLabel("Ключевая фраза или раздел каталога:"))
         self.key_word_input = QLineEdit()
         self.key_word_input.setPlaceholderText("Key word")
         self.key_word_input.setFixedHeight(35)
@@ -361,7 +368,22 @@ class MainWindow(QWidget):
         self.btn_cancel_parsing.setMinimumHeight(42)
         self.btn_cancel_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel_parsing.setStyleSheet(CANCEL_BUTTON_STYLE)
+        self.btn_cancel_parsing.setEnabled(False)  # Отключена по умолчанию
         parsing_layout.addWidget(self.btn_cancel_parsing)
+
+        self.btn_preview_parsing = QPushButton("ПРОСМОТР")
+        self.btn_preview_parsing.setMinimumHeight(42)
+        self.btn_preview_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_preview_parsing.setStyleSheet(PREVIEW_BUTTON_STYLE)
+        self.btn_preview_parsing.setEnabled(False)  # Отключена по умолчанию
+        parsing_layout.addWidget(self.btn_preview_parsing)
+
+        self.btn_export_parsing = QPushButton("ЭКСПОРТ")
+        self.btn_export_parsing.setMinimumHeight(42)
+        self.btn_export_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_export_parsing.setStyleSheet(EXPORT_BUTTON_STYLE)
+        self.btn_export_parsing.setEnabled(False)  # Отключена по умолчанию
+        parsing_layout.addWidget(self.btn_export_parsing)
 
         parsing_layout.addStretch()
         self.stack.addWidget(self.page_parsing)
@@ -379,23 +401,30 @@ class MainWindow(QWidget):
         settings_layout.addWidget(self.btn_back_settings)
         settings_layout.addSpacing(5)
 
-        lbl_settings_title = QLabel("Предустановки системы")
+        lbl_settings_title = QLabel("Настройки системы")
         lbl_settings_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #ffffff;")
         settings_layout.addWidget(lbl_settings_title)
         settings_layout.addSpacing(5)
 
         settings_layout.addWidget(QLabel("Таймаут запросов (сек):"))
         self.timeout_input = QLineEdit()
-        self.timeout_input.setPlaceholderText("7")
-        self.timeout_input.setText("7")
+        self.timeout_input.setPlaceholderText("10")
+        self.timeout_input.setText("")
         self.timeout_input.setFixedHeight(35)  # Фиксируем высоту
         settings_layout.addWidget(self.timeout_input)
 
-        settings_layout.addWidget(QLabel("Папка импорта данных:"))
+        settings_layout.addWidget(QLabel("Загрузить базовую конфигурацию"))
         self.import_path_input = QLineEdit()
-        self.import_path_input.setPlaceholderText("./logs")
+        self.import_path_input.setPlaceholderText("table_shema")
+        self.import_path_input.setText("")
         self.import_path_input.setFixedHeight(35)  # Фиксируем высоту
         settings_layout.addWidget(self.import_path_input)
+
+        settings_layout.addWidget(QLabel("Прокси адрес:"))
+        self.proxy_url = QLineEdit()
+        self.proxy_url.setPlaceholderText("176.15.164.69")
+        self.proxy_url.setFixedHeight(35)  # Фиксируем высоту
+        settings_layout.addWidget(self.proxy_url)
 
         settings_layout.addSpacing(15)
         self.btn_save_settings = QPushButton("Сохранить конфигурацию")
@@ -413,18 +442,19 @@ class MainWindow(QWidget):
         z2_layout = QVBoxLayout(self.zone2)
         z2_layout.setContentsMargins(15, 15, 15, 15)
 
-        lbl_data_title = QLabel("<b>📋 ПАНЕЛЬ ВЫВОДА ДАННЫХ</b>")
+        lbl_data_title = QLabel("<b>📋 ВЫВОД ДАННЫХ</b>")
         lbl_data_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
         z2_layout.addWidget(lbl_data_title)
 
         self.result_display = QTextEdit()
-        self.result_display.setPlaceholderText("Здесь будут отображаться структурированные ответы от Django API...")
+        self.result_display.setPlaceholderText("Здесь будет отображаться текущая справочная информация...")
         z2_layout.addWidget(self.result_display)
 
         top_splitter.addWidget(self.zone1)
         top_splitter.addWidget(self.zone2)
-        top_splitter.setStretchFactor(0, 1)
-        top_splitter.setStretchFactor(1, 2)
+        top_splitter.setStretchFactor(0, 0)  # zone1 фиксированной ширины
+        top_splitter.setStretchFactor(1, 1)  # zone2 занимает всё оставшееся пространство
+        top_splitter.setSizes([350, 750])  # Фиксированная ширина zone1 = 350px
 
         # --- СОЗДАЕМ ГЛАВНЫЙ ВЕРТИКАЛЬНЫЙ СПЛИТТЕР ---
         main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -435,7 +465,7 @@ class MainWindow(QWidget):
         z3_layout = QVBoxLayout(self.zone3)
         z3_layout.setContentsMargins(15, 15, 15, 15)
 
-        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ (ЛОГИ)</b>")
+        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ</b>")
         lbl_log_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
         z3_layout.addWidget(lbl_log_title)
 
@@ -530,9 +560,11 @@ class MainWindow(QWidget):
         self.btn_parsing_menu.clicked.connect(self.show_parsing_page)  # На форму парсинга
         self.btn_back_parsing.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
-        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self)) # Отмена парсинга
+        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self))  # Отмена парсинга
+        self.btn_export_parsing.clicked.connect(lambda: parsing_export_on_click(self))  # Экспорт парсинга
+        self.btn_preview_parsing.clicked.connect(lambda: parsing_preview_on_click(self))  # Просмотр парсинга
 
         # Настройки
-        self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек
+        self.btn_settings_menu.clicked.connect(self.show_settings_page)  # На форму настроек
         self.btn_back_settings.clicked.connect(self.show_menu_page)
         self.btn_save_settings.clicked.connect(self.on_save_settings_click)

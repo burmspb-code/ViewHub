@@ -90,8 +90,46 @@ BACK_BUTTON_STYLE = """
     }
 """
 
+# Стиль кнопки "Экспорт" (с заливкой)
+EXPORT_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #334155; /* Slate 700 */
+        color: #f8fafc;            /* Slate 50 */
+        border: 1px solid #475569; /* Slate 600 */
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background-color: #475569; /* Slate 600 */
+        border-color: #64748b;     /* Slate 500 */
+    }
+    QPushButton:pressed {
+        background-color: #1e293b; /* Slate 800 */
+    }
+"""
+
+PREVIEW_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #104E8B; /* Очень глубокий темно синий */
+        color: #e2e8f0;            /* Slate 200 */
+        border: 1px solid #1e293b; /* Slate 800 */
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background-color: #1e3a8a; /* Blue 900 (Проявляется синий при наведении) */
+        color: #f8fafc;            /* Slate 50 */
+        border-color: #2563eb;     /* Blue 600 */
+    }
+    QPushButton:pressed {
+        background-color: #0f172a; /* Slate 900 */
+    }
+"""
+
 # Стиль компактной кнопки "Показать" пароль
-TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;" # noqa: S105
+TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;"  # noqa: S105
 
 # Зеленая акцентная кнопка "Войти/Начать"
 SUBMIT_BUTTON_STYLE = """
