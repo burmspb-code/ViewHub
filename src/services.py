@@ -253,7 +253,7 @@ def parsing_on_click(obj) -> None:
     config = GoldenAppleConfig(target_url, keyword)
     extractor = GoldenAppleExtractor(config)
 
-    manager = DatabaseManager()  # db_path подхватится из DBConfig: storage/viewhub.db
+    manager = DatabaseManager()  # db_path подхватится из DBConfig: storage/viewhub_parsing.db
     parser = None  # Инициализируем для использования после try-except
 
     try:

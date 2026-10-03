@@ -51,7 +51,7 @@ class GoldenAppleParser(BaseParser):
 
     def load_product_detail_page(self, context, product_url: str, product_id: str) -> Any:
         """
-        Модуль 3 (СИНХРОННЫЙ ООП вариант): Открытие фоновой вкладки товара.
+        Открытие фоновой вкладки товара.
         Терпеливо дожидается, пока лоадер сайта (дефис) не сменится реальным текстом товара.
         """
 

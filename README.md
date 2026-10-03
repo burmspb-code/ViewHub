@@ -108,7 +108,7 @@ db_items_pages = manager.check_existing_items_with_pages(item_id_list)
 
 ## 🛠️ Стек технологий
 
-* **Язык программирования**: Python 3.14+
+* **Язык программирования**: Python 3.11–3.14 (проверено на 3.14)
 * **Автоматизация браузера**: Playwright (Chromium, эмуляция плавного скролла для Nuxt 3, подмена сетевых отпечатков и изоляция изолированных профилей)
 * **Прокси-инфраструктура**: Dante Server (SOCKS5, порт 80, фильтрация по подсетям / IP)
 * **СУБД**: SQLite3 (Пакетная поддержка, WAL-режим транзакций, автоинкремент)
@@ -174,7 +174,7 @@ poetry run ruff check
 
 ### 1. Подготовка репозитория
 ```bash
-git clone https://github.com
+git clone https://github.com/burmspb-code/ViewHub.git
 cd ViewHub
 ```
 
@@ -184,7 +184,14 @@ poetry install
 poetry run playwright install chromium
 ```
 
-### 3. Запуск приложения
+### 3. Настройка окружения
+Файл `.env.sample` содержит переменные окружения проекта. По умолчанию база данных хранится в папке `storage` и называется `viewhub_parsing.db`. При необходимости можно переопределить путь через переменную `DB_PATH_PARSING`:
+
+```env
+DB_PATH_PARSING=C:\\path\\to\\storage\\viewhub_parsing.db
+```
+
+### 4. Запуск приложения
 ```bash
 poetry run python main.py
 ```
@@ -193,4 +200,4 @@ poetry run python main.py
 
 ## 📄 Лицензия
 
-Проект распространяется под лицензией **MIT**. Подробная информация находится в файле `LICENSE`.
+Лицензия в репозитории пока не объявлена. Перед релизом рекомендуется добавить файл `LICENSE` и зафиксировать выбранный тип лицензии (например, MIT).

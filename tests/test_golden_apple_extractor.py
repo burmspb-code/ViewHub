@@ -1,12 +1,15 @@
 import pytest
+from typing  import Dict
 from bs4 import BeautifulSoup
 from core.base_classes import BaseDBParsingConfig
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
+
 
 @pytest.fixture
 def config_class():
     """Фикстура возвращает сам класс конфигурации как объект."""
     return BaseDBParsingConfig
+
 
 @pytest.fixture
 def extractor():
@@ -21,6 +24,7 @@ def test_golden_apple_init_extractor(config_class):
     # Проверяем идентичность объекта конфигурации в памяти
     assert extrac_data.config == config_class
     assert extrac_data.config is config_class
+
 
 def test_extract_deep_data_success(extractor):
     """1. Проверка успешного извлечения всех характеристик при идеальном HTML."""
@@ -242,6 +246,7 @@ def test_parse_single_card_global_exception(extractor, monkeypatch):
     result = extractor._parse_single_card(soup, "uniseks-aromaty")
     assert result is None
 
+
 # Создаем поддельный конфиг, у которого точно есть атрибут keyword со слешами
 class FakeConfigWithKeyword(BaseDBParsingConfig):
     keyword = "/parfjumerija/uniseks-aromaty/"
@@ -265,9 +270,7 @@ def test_extract_data_with_config_keyword():
         '<div storage-scroll-id="999"><div class="_ga-price">1 000 ₽</div></div>',
         "html.parser",
     )
-    banner_card = BeautifulSoup(
-        '<div class="banner">Реклама косметики</div>', "html.parser"
-    )
+    banner_card = BeautifulSoup('<div class="banner">Реклама косметики</div>', "html.parser")
 
     raw_content = [valid_card, banner_card]
 
