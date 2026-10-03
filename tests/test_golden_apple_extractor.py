@@ -1,5 +1,5 @@
 import pytest
-from typing  import Dict
+from typing import Dict
 from bs4 import BeautifulSoup
 from core.base_classes import BaseDBParsingConfig
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor

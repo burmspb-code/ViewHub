@@ -35,16 +35,12 @@ from src.core.styles import (
     EXPORT_BUTTON_STYLE,
     PREVIEW_BUTTON_STYLE,
 )
-from src.services import (
-    auth_on_click,
-    parsing_on_click,
-    parsing_cancel_on_click,
-    request_on_click,
-    scanning_on_click,
-    scanning_cancel_on_click,
-    parsing_export_on_click,
-    parsing_preview_on_click,
-)
+from src.service_modules.auth_service import auth_on_click, request_on_click
+from src.service_modules.parsing_service import parsing_on_click, parsing_cancel_on_click
+from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
+from src.service_modules.export_service import parsing_export_on_click
+from src.service_modules.db_viewer_service import parsing_preview_on_click
+
 
 logger = logging.getLogger(__name__)
 

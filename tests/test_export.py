@@ -10,25 +10,33 @@ from unittest.mock import MagicMock, patch
 from PyQt6.QtWidgets import QFileDialog, QWidget, QTableWidget, QPushButton
 from PyQt6.QtCore import QThread
 
-from src.services import (
+# Экспорт и сохранение файлов
+from src.service_modules.export_service import (
     parsing_file_save,
     parsing_db_read,
     parsing_export_init,
+    parsing_export_on_click,
+)
+
+# Хелперы обратного вызова и обновления UI статусов
+from src.service_modules.ui_helpers import (
     _update_parsing_status,
     _stop_handler,
     _parsing_success_handler,
     _scanning_success_handler,
-    scanning_on_click,
-    auth_on_click,
-    scanning_cancel_on_click,
-    request_on_click,
-    parsing_cancel_on_click,
-    parsing_export_on_click,
-    parsing_on_click,
-    parsing_preview_on_click,
-    close_db_viewer,
-    create_db_viewer,
 )
+
+# Авторизация и сетевые запросы
+from src.service_modules.auth_service import auth_on_click, request_on_click
+
+# Парсинг и управление потоком парсера
+from src.service_modules.parsing_service import parsing_on_click, parsing_cancel_on_click
+
+# Сканирование эндпоинтов и управление потоком сканера
+from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
+
+# Просмотрщик баз данных (UI Viewer)
+from src.service_modules.db_viewer_service import parsing_preview_on_click, close_db_viewer, create_db_viewer
 
 
 def test_parsing_export_init_with_config_name():
@@ -450,7 +458,7 @@ def test_auth_on_click_missing_fields():
     mock_obj.login_input.text.return_value = ""  # Пустой логин
     mock_obj.password_input.text.return_value = "secret123"
 
-    with patch("src.services.login_to_django") as mock_login:
+    with patch("src.auth.api_client.login_to_django") as mock_login:
         auth_on_click(mock_obj)
 
         # Сетевой клиент не должен был вызываться
@@ -468,7 +476,7 @@ def test_auth_on_click_success():
     # Имитируем успешный ответ от Django API
     fake_response = {"success": True, "message": "Сессия успешно создана.", "token": "JWT_TOKEN_XYZ_123"}
 
-    with patch("src.services.login_to_django", return_value=fake_response) as mock_login:
+    with patch("src.service_modules.auth_service.login_to_django", return_value=fake_response) as mock_login:
         auth_on_click(mock_obj)
 
         # Проверяем, что сетевой клиент вызвался с очищенными от пробелов данными
@@ -502,7 +510,7 @@ def test_auth_on_click_failed_with_details():
         "details": "Пользователь заблокирован за спам-попытки.",
     }
 
-    with patch("src.services.login_to_django", return_value=fake_response):
+    with patch("src.service_modules.auth_service.login_to_django", return_value=fake_response):
         auth_on_click(mock_obj)
 
         # Проверяем, что детали ошибки отобразились на экране
@@ -520,7 +528,7 @@ def test_auth_on_click_failed_generic_error():
     # В ответе нет ключа "details"
     fake_response = {"success": False, "message": "Ошибка 500."}
 
-    with patch("src.services.login_to_django", return_value=fake_response):
+    with patch("src.service_modules.auth_service.login_to_django", return_value=fake_response):
         auth_on_click(mock_obj)
 
         # Проверяем стандартный фоллбек-текст
@@ -653,7 +661,7 @@ def test_scanning_on_click_missing_url():
     mock_obj.base_url_input.text.return_value = "   "
 
     # Мокаем класс сканера, чтобы он не инициализировался реальным сетевым адресом
-    with patch("src.services.AsyncScanEndpoint"), patch("src.services.QThread") as mock_thread_class:
+    with patch("src.scanners.async_scan_ep.AsyncScanEndpoint"), patch("PyQt6.QtCore.QThread") as mock_thread_class:
         scanning_on_click(mock_obj)
 
         # Проверяем установку красной рамки
@@ -675,9 +683,9 @@ def test_scanning_on_click_success_thread_start():
     mock_worker = MagicMock()
 
     with (
-        patch("src.services.AsyncScanEndpoint"),
-        patch("src.services.QThread", return_value=mock_thread),
-        patch("src.services.ScannerWorker", return_value=mock_worker),
+        patch("src.service_modules.scanning_service.AsyncScanEndpoint"),
+        patch("src.service_modules.scanning_service.QThread", return_value=mock_thread),
+        patch("src.service_modules.scanning_service.ScannerWorker", return_value=mock_worker),
     ):
         scanning_on_click(mock_obj)
 
@@ -742,7 +750,7 @@ def test_scanning_cancel_on_click_not_running():
     mock_obj.scaner_thread = MagicMock()
     mock_obj.scaner_thread.isRunning.return_value = False
 
-    with patch("src.services.logger") as mock_logger:
+    with patch("src.service_modules.scanning_service.logger") as mock_logger:
         scanning_cancel_on_click(mock_obj)
 
         # Проверяем, что никаких действий не произошло, кроме записи предупреждения
@@ -763,7 +771,7 @@ def test_scanning_cancel_on_click_no_thread_attribute():
     mock_obj.btn_cancel_scanning = MagicMock()
     mock_obj.scaner_worker = MagicMock()
 
-    with patch("src.services.logger") as mock_logger:
+    with patch("src.service_modules.scanning_service.logger") as mock_logger:
         scanning_cancel_on_click(mock_obj)
 
         # hasattr вернет False, код уйдет в безопасный ветку else
@@ -806,7 +814,7 @@ def test_parsing_cancel_on_click_not_running():
     mock_obj.parser_thread = MagicMock()
     mock_obj.parser_thread.isRunning.return_value = False
 
-    with patch("src.services.logger") as mock_logger:
+    with patch("src.service_modules.parsing_service.logger") as mock_logger:
         parsing_cancel_on_click(mock_obj)
 
         # Никакие UI-действия не должны выполняться, пишется только предупреждение
@@ -825,7 +833,7 @@ def test_parsing_cancel_on_click_no_thread_attribute():
     mock_obj.btn_cancel_parsing = MagicMock()
     mock_obj.parser_worker = MagicMock()
 
-    with patch("src.services.logger") as mock_logger:
+    with patch("src.service_modules.parsing_service.logger") as mock_logger:
         parsing_cancel_on_click(mock_obj)
 
         # Код безопасно уходит в ветку else
@@ -838,7 +846,7 @@ def test_parsing_export_on_click_empty_path_name():
     mock_obj.btn_export_parsing = MagicMock()
 
     # Настраиваем фиктивный пустой возврат имени файла
-    with patch("src.services.parsing_export_init", return_value=""):
+    with patch("src.service_modules.export_service.parsing_export_init", return_value=""):
         parsing_export_on_click(mock_obj)
 
         # Кнопка экспорта не должна блокироваться, так как выход произошел раньше
@@ -852,9 +860,9 @@ def test_parsing_export_on_click_empty_or_none_table():
 
     # Настраиваем успешное имя файла, но пустой DataFrame при чтении таблицы
     with (
-        patch("src.services.parsing_export_init", return_value="valid_name.xlsx"),
-        patch("src.services.parsing_db_read", return_value=pd.DataFrame()) as mock_read,
-        patch("src.services.parsing_file_save") as mock_save,
+        patch("src.service_modules.export_service.parsing_export_init", return_value="valid_name.xlsx"),
+        patch("src.service_modules.export_service.parsing_db_read", return_value=pd.DataFrame()) as mock_read,
+        patch("src.service_modules.export_service.parsing_file_save") as mock_save,
     ):
         parsing_export_on_click(mock_obj)
 
@@ -873,7 +881,10 @@ def test_parsing_on_click_missing_target_url():
     mock_obj.target_url_input.text.return_value = "   "  # Пустая ссылка
     mock_obj.key_word_input.text.return_value = "косметика"
 
-    with patch("src.services.GoldenAppleConfig"), patch("src.services.QThread") as mock_thread_class:
+    with (
+        patch("src.parsers_config.golden_apple_config.GoldenAppleConfig"),
+        patch("PyQt6.QtCore.QThread") as mock_thread_class,
+    ):
         parsing_on_click(mock_obj)
 
         # Проверяем установку красной рамки на поле ссылки
@@ -888,7 +899,10 @@ def test_parsing_on_click_missing_keyword():
     mock_obj.target_url_input.text.return_value = "https://goldapple.ru"
     mock_obj.key_word_input.text.return_value = ""  # Пустой ключ
 
-    with patch("src.services.GoldenAppleConfig"), patch("src.services.QThread") as mock_thread_class:
+    with (
+        patch("src.parsers_config.golden_apple_config.GoldenAppleConfig"),
+        patch("PyQt6.QtCore.QThread") as mock_thread_class,
+    ):
         parsing_on_click(mock_obj)
 
         # Должно подсветиться именно поле ключевого слова
@@ -907,10 +921,10 @@ def test_parsing_on_click_db_initialization_error():
     mock_manager.init_for_config.side_effect = Exception("Disk I/O Error")
 
     with (
-        patch("src.services.GoldenAppleConfig"),
-        patch("src.services.GoldenAppleExtractor"),
-        patch("src.services.DatabaseManager", return_value=mock_manager),
-        patch("src.services.QThread") as mock_thread_class,
+        patch("src.service_modules.parsing_service.GoldenAppleConfig"),
+        patch("src.service_modules.parsing_service.GoldenAppleExtractor"),
+        patch("src.service_modules.parsing_service.DatabaseManager", return_value=mock_manager),
+        patch("src.service_modules.parsing_service.QThread") as mock_thread_class,
     ):
         # Функция должна выбросить RuntimeError, защищая от запуска с битой БД
         with pytest.raises(RuntimeError, match="Не удалось подготовить базу данных"):
@@ -936,12 +950,12 @@ def test_parsing_on_click_success_thread_start():
     mock_parser = MagicMock()
 
     with (
-        patch("src.services.GoldenAppleConfig"),
-        patch("src.services.GoldenAppleExtractor"),
-        patch("src.services.DatabaseManager"),
-        patch("src.services.GoldenAppleParser", return_value=mock_parser),
-        patch("src.services.QThread", return_value=mock_thread),
-        patch("src.services.ParserWorker", return_value=mock_worker),
+        patch("src.service_modules.parsing_service.GoldenAppleConfig"),
+        patch("src.service_modules.parsing_service.GoldenAppleExtractor"),
+        patch("src.service_modules.parsing_service.DatabaseManager"),
+        patch("src.service_modules.parsing_service.GoldenAppleParser", return_value=mock_parser),
+        patch("src.service_modules.parsing_service.QThread", return_value=mock_thread),
+        patch("src.service_modules.parsing_service.ParserWorker", return_value=mock_worker),
     ):
         parsing_on_click(mock_obj)
 
@@ -985,7 +999,10 @@ def test_parsing_preview_on_click_already_open():
     # Имитируем, что viewer уже создан и активен
     mock_obj.db_viewer = MagicMock()
 
-    with patch("src.services.logger") as mock_logger, patch("src.services.create_db_viewer") as mock_create:
+    with (
+        patch("src.service_modules.db_viewer_service.logger") as mock_logger,
+        patch("src.service_modules.db_viewer_service.create_db_viewer") as mock_create,
+    ):
         parsing_preview_on_click(mock_obj)
 
         # Должно записаться предупреждение, а создание виджета не должно вызываться
@@ -999,7 +1016,7 @@ def test_parsing_preview_on_click_missing_parser():
     mock_obj.db_viewer = None
     del mock_obj.parser  # Парсер отсутствует
 
-    with patch("src.services.logger") as mock_logger:
+    with patch("src.service_modules.db_viewer_service.logger") as mock_logger:
         parsing_preview_on_click(mock_obj)
 
         mock_logger.warning.assert_called_once_with(
@@ -1014,7 +1031,7 @@ def test_parsing_preview_on_click_missing_db_or_table():
     mock_obj.parser.manager.db_path = None  # Путь пустой
     mock_obj.parser.manager.table_name = "products"
 
-    with patch("src.services.logger") as mock_logger:
+    with patch("src.service_modules.db_viewer_service.logger") as mock_logger:
         parsing_preview_on_click(mock_obj)
 
         mock_logger.warning.assert_called_once_with("Ошибка экспорта. Не найден путь к БД или имя таблицы.")
@@ -1037,7 +1054,7 @@ def test_parsing_preview_on_click_success_mount():
     # Создаем фальшивый виджет таблицы
     mock_viewer = MagicMock()
 
-    with patch("src.services.create_db_viewer", return_value=mock_viewer) as mock_create:
+    with patch("src.service_modules.db_viewer_service.create_db_viewer", return_value=mock_viewer) as mock_create:
         parsing_preview_on_click(mock_obj)
 
         # 1. Проверяем, что конструктор viewer вызвался с правильными параметрами
@@ -1067,7 +1084,7 @@ def test_parsing_preview_on_click_finally_fallback_unblock():
     mock_obj.btn_preview_parsing = MagicMock()
 
     # Имитируем, что функция создания виджета вернула None (например, сбой SQLite)
-    with patch("src.services.create_db_viewer", return_value=None):
+    with patch("src.service_modules.db_viewer_service.create_db_viewer", return_value=None):
         parsing_preview_on_click(mock_obj)
 
         # Ссылка в obj осталась None
@@ -1192,7 +1209,7 @@ def test_create_db_viewer_button_click(monkeypatch, qtbot, tmp_path):
     temp_db_file = str(tmp_path / "test_products.db")
     monkeypatch.setattr(pd, "read_sql_query", lambda *args, **kwargs: test_df)
 
-    with patch("src.services.close_db_viewer") as mock_close:
+    with patch("src.service_modules.db_viewer_service.close_db_viewer") as mock_close:
         viewer = create_db_viewer(temp_db_file, "products", mock_obj)
         qtbot.addWidget(viewer)
 
