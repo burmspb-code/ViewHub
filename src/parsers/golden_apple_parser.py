@@ -24,7 +24,7 @@ PARSER_DESCRIPTION = (
     "Парсер добавляет товары в БД из выбранных РАЗДЕЛОВ сайта.\n"
     "Введите ключевую фразу, например: 'parfjumerija/uniseks-aromaty'.\n"
     "Парсер НЕ ищет товары по запросу вида: 'крем' или 'помада'\n"
-    "Экспорт данных из базы доступен в формате .xlsx или .csv/.\n"
+    "Экспорт данных из базы доступен в формате .xlsx или .csv.\n"
 )
 
 
@@ -41,12 +41,14 @@ class GoldenAppleParser(BaseParser):
         # Создаем папку для профиля браузера:
         # Определяем корень проекта/папку с .exe в зависимости от режима запуска
         if getattr(sys, "frozen", False):
-            root_dir = Path(sys.executable).resolve().parent
+            # В PyInstaller используем временную директорию системы (всегда доступна для записи)
+            import tempfile
+            root_dir = Path(tempfile.gettempdir()) / "viewhub"
         else:
             # Если в IDE запускается из корня через main, используем Path.cwd()
             root_dir = Path.cwd()
 
-        # Создаем папку для профиля браузера в надежном месте (например, внутри папки storage)
+        # Создаем папку для профиля браузера в надежном месте
         self.user_data_dir = root_dir / "chrome_user_profile"
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
 
