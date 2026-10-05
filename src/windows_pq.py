@@ -8,6 +8,8 @@
 
 import logging
 
+from contextlib import suppress
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
@@ -36,7 +38,7 @@ from src.core.styles import (
     PREVIEW_BUTTON_STYLE,
 )
 from src.service_modules.auth_service import auth_on_click, request_on_click
-from src.service_modules.parsing_service import parsing_on_click, parsing_cancel_on_click
+from src.service_modules.parsing_service import parsing_on_click, parsing_cancel_on_click, prepare_parsing
 from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
 from src.service_modules.export_service import parsing_export_on_click
 from src.service_modules.db_viewer_service import parsing_preview_on_click
@@ -133,6 +135,7 @@ class MainWindow(QWidget):
 
         # Для экспорта данных парсинга
         self.parser = None
+        self.manager = None
 
         # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
         self.init_ui()
@@ -529,8 +532,28 @@ class MainWindow(QWidget):
         self.stack.setCurrentIndex(3)  # Возвращаем на индекс сканирования (3)
 
     def show_parsing_page(self):
-        """Открыть страницу парсинга."""
-        self.stack.setCurrentIndex(4)  # Возвращаем на индекс парсинга (4)
+        """Открытие меню парсинга."""
+        try:
+            # Запускаем функцию сборки парсера
+            prepare_parsing(self)
+
+            # ЕСЛИ ВСЁ ОК: только теперь перекидываем пользователя в меню парсинга (индекс 4)
+            self.stack.setCurrentIndex(4)
+
+            # Выводим готовое описание парсера на новый экран
+            self.result_display.setText(f"🔔 ОПИСАНИЕ\n{self.parser.description}\n\n")
+
+        except (ValueError, RuntimeError) as e:
+            # Закрываем менеджер напрямую через self, если он успел создаться
+            if getattr(self, "manager", None) is not None:
+                with suppress(Exception):
+                    self.manager.close()
+            # Тотальное обнуление для чистоты системы
+            self.manager = None
+            self.parser = None
+            self.result_display.setText(
+                f"⚠️ Внимание\n❌ {e!s}\n\nПожалуйста, устраните проблему и нажмите кнопку 'Парсинг' еще раз."
+            )
 
     def show_settings_page(self):
         """Переключить стек на страницу настроек (Индекс 2)."""

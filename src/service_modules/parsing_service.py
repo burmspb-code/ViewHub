@@ -19,27 +19,46 @@ logger = logging.getLogger(__name__)
 
 def parsing_on_click(obj) -> None:
     """Запуск парсинга выбранного сайта в фоновом потоке."""
-    # Считываем данные из текстовых полей переданного UI-объекта
+
+    # Достаем ссылку и ключ напрямую из пролей ввода
     target_url = obj.target_url_input.text().strip()
     keyword = obj.key_word_input.text().strip()
 
-    # Если менеджер забыл ввести ссылку, подсвечиваем поле
-    if not target_url:
-        with suppress(Exception):
+    # Проверка на пустые поля (подсвечиваем красным, если менеджер забыл ввести данные)
+    if not target_url or not keyword:
+        if not target_url:
             obj.target_url_input.setStyleSheet("border: 1px solid #ef4444;")
-        return
-
-    if not keyword:
-        with suppress(Exception):
+        if not keyword:
             obj.key_word_input.setStyleSheet("border: 1px solid #ef4444;")
-        return
+        # Выбрасываем понятную ошибку, чтобы её поймал внешний try-except в меню
+        raise ValueError("Поля 'Ссылка' и 'Ключевое слово' не должны быть пустыми!")
 
-    # Сбрасываем красную рамку, если ссылка введена
-    with suppress(Exception):
-        obj.target_url_input.setStyleSheet("")
+    # Сбрасываем красные рамки, если данные введены корректно
+    obj.target_url_input.setStyleSheet("")
+    obj.key_word_input.setStyleSheet("")
 
-    with suppress(Exception):
-        obj.key_word_input.setStyleSheet("")
+    # Записываем введенные данные в кофиг парсера
+    obj.parser.config.target_url = target_url
+    obj.parser.config.keyword = keyword
+
+    try:
+        # Инициализируем таблицы базы данных (Слой Данных)
+        table_name = obj.manager.init_for_config(obj.parser.config)
+        logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {obj.manager.db_path}")
+
+    except Exception as e:
+        error_msg = f"❌ Критическая ошибка инициализации базы данных: {e}"
+        logger.error(error_msg, exc_info=True)
+
+        # Освобождаем ресурсы базы данных
+        if getattr(obj, "manager", None) is not None:
+            with suppress(Exception):
+                obj.manager.close()
+
+        # Полностью очищаем битые объекты
+        obj.manager = None
+        obj.parser = None
+        raise RuntimeError(f"Не удалось подготовить базу данных: {e}") from e
 
     # Блокируем элементы управления, чтобы избежать повторных кликов во время работы
     if hasattr(obj, "btn_send_scanning"):
@@ -52,53 +71,25 @@ def parsing_on_click(obj) -> None:
     if hasattr(obj, "btn_cancel_parsing"):
         obj.btn_cancel_parsing.setEnabled(True)
 
+    # Выводим информацию о старте в окно логов (используем уже извлеченные переменные)
     obj.result_display.append(f"⏳ Запуск парсера для сайта: {target_url}, ключ: {keyword}")
     logger.info(f"Старт парсера по адресу {target_url}")
 
-    # ================ Конфигурируем парсер под конкретную задачу ========================
-
-    config = GoldenAppleConfig(target_url, keyword)
-    extractor = GoldenAppleExtractor(config)
-
-    manager = DatabaseManager()  # db_path подхватится из DBConfig: storage/viewhub_parsing.db
-    parser = None  # Инициализируем для использования после try-except
-
-    try:
-        # Создаём таблицу и привязываем конфиг + session_id к сейверу
-        table_name = manager.init_for_config(config)
-        logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {manager.db_path}")
-
-        # Парсер создаем только если БД успешно инициализирована
-        parser = GoldenAppleParser(config=config, extractor=extractor, manager=manager)
-
-        # Сохраняем парсер в объекте окна для использования в экспорте
-        obj.parser = parser
-
-    except Exception as e:
-        # Критическая ошибка инициализации БД: дальше запускать парсер нельзя
-        error_msg = f"❌ Критическая ошибка инициализации базы данных: {e}"
-        logger.error(error_msg)
-        # Прерываем выполнение этого блока (в зависимости от твоей архитектуры, здесь может быть return или raise)
-        raise RuntimeError("Не удалось подготовить базу данных. Парсинг остановлен.") from e
-
-    # ====================================================================================
-
-    # Включаем кнопку просмотра
-    if hasattr(obj, "btn_cancel_parsing"):
+    # Включаем кнопки просмотра и экспорта результатов
+    if hasattr(obj, "btn_preview_parsing"):
         obj.btn_preview_parsing.setEnabled(True)
 
-    # Включаем кнопку экспорта
-    if hasattr(obj, "btn_cancel_parsing"):
+    if hasattr(obj, "btn_export_parsing"):
         obj.btn_export_parsing.setEnabled(True)
 
     # Сначала создаем чистый системный поток QThread
     obj.parser_thread = QThread()
 
-    # Затем создаем рабочий объект (Воркер) и передаем ему парсер
-    obj.parser_worker = ParserWorker(parser=parser)
+    # Затем создаем рабочий объект (Воркер) и передаем ему готовый парсер из объекта окна
+    obj.parser_worker = ParserWorker(parser=obj.parser)
 
-    # Прикрепляем сигнал к парсеру
-    parser.progress_callback = obj.parser_worker.progress_signal.emit
+    # ИСПРАВЛЕНО: Прикрепляем колбэк прогресса к ПРАВИЛЬНОМУ объекту парсера через obj.
+    obj.parser.progress_callback = obj.parser_worker.progress_signal.emit
 
     # Перемещаем воркер в фоновый поток
     obj.parser_worker.moveToThread(obj.parser_thread)
@@ -121,6 +112,14 @@ def parsing_on_click(obj) -> None:
 
     # Запускаем фоновый поток выполнения Playwright
     obj.parser_thread.start()
+
+
+def prepare_parsing(obj) -> None:
+    """Сборка парсера."""
+    config = GoldenAppleConfig()  # Конфиг по умолчанию
+    extractor = GoldenAppleExtractor(config)
+    obj.manager = DatabaseManager()
+    obj.parser = GoldenAppleParser(config=config, extractor=extractor, manager=obj.manager)
 
 
 def parsing_cancel_on_click(obj) -> None:

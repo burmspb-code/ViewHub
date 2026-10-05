@@ -1,12 +1,12 @@
 """Класс парсинга для Сайта Золотое яблоко."""
 
-import os
 import time
 import logging
 import re
 import random
 import typing
 
+from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
@@ -18,18 +18,28 @@ from src.my_exceptions.exceptions import ExceptionStopParser
 
 logger = logging.getLogger(__name__)
 
+PARSER_DESCRIPTION = (
+    "-" * 85 + "\n"
+    "Парсер добавляет товары в БД из выбранных РАЗДЕЛОВ сайта.\n"
+    "Введите ключевую фразу вида: 'parfjumerija/uniseks-aromaty'.\n"
+    "Парсер НЕ ищет товары по запросу вида: 'крем' или 'помада'\n"
+    "Экспор данных из базы доступен в формате .xlsx или .csv/.\n"
+)
+
 
 class GoldenAppleParser(BaseParser):
     """Парсинг Сайта Golden Apple."""
 
     def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, manager: DatabaseManager):
         super().__init__(config, extractor, manager)
+        self.description = PARSER_DESCRIPTION
         # Номер текущей страницы, всегда начинаем с первой страницы
         self.current_page = 1
         # Счетчик пустых страниц подряд для надежной остановки
         self.empty_pages_count = 0
         # Создаем папку для профиля браузера
-        self.user_data_dir = os.path.join(os.getcwd(), "chrome_user_profile")
+        self.user_data_dir = Path(__file__).resolve().parent / "chrome_user_profile"
+        self.user_data_dir.mkdir(parents=True, exist_ok=True)
 
     def _build_url(self, page: int = 1) -> str:
         """

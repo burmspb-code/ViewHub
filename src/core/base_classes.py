@@ -29,7 +29,7 @@ class BaseDBParsingConfig(ABC):
     # Дефолтные констрейнты таблицы (по умолчанию пустые)
     TABLE_CONSTRAINTS: ClassVar[tuple] = ()
 
-    def __init__(self, target_url: str, keyword: str = "", file_name: str = "") -> None:
+    def __init__(self, target_url: str = "", keyword: str = "", file_name: str = "") -> None:
         self.target_url = target_url
         self.keyword = keyword
         self.file_name = file_name
@@ -83,6 +83,7 @@ class BaseParser(ABC):
         self.config: BaseDBParsingConfig = config
         self.extractor: BaseExtractor = extractor
         self.manager: BaseDataBase = manager
+        self.description: str = ""
         self._is_running: bool = True
 
     def cancel(self) -> None:
