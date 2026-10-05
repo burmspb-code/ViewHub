@@ -41,9 +41,8 @@ class GoldenAppleParser(BaseParser):
         # Создаем папку для профиля браузера:
         # Определяем корень проекта/папку с .exe в зависимости от режима запуска
         if getattr(sys, "frozen", False):
-            # В PyInstaller используем временную директорию системы (всегда доступна для записи)
-            import tempfile
-            root_dir = Path(tempfile.gettempdir()) / "viewhub"
+            # В PyInstaller используем директорию с exe файлом
+            root_dir = Path(sys.executable).resolve().parent
         else:
             # Если в IDE запускается из корня через main, используем Path.cwd()
             root_dir = Path.cwd()
