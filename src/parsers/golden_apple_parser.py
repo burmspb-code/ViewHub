@@ -1,5 +1,6 @@
 """Класс парсинга для Сайта Золотое яблоко."""
 
+import sys
 import time
 import logging
 import re
@@ -37,9 +38,20 @@ class GoldenAppleParser(BaseParser):
         self.current_page = 1
         # Счетчик пустых страниц подряд для надежной остановки
         self.empty_pages_count = 0
-        # Создаем папку для профиля браузера
-        self.user_data_dir = Path(__file__).resolve().parent / "chrome_user_profile"
+        # Создаем папку для профиля браузера:
+        # Определяем корень проекта/папку с .exe в зависимости от режима запуска
+        if getattr(sys, "frozen", False):
+            root_dir = Path(sys.executable).resolve().parent
+        else:
+            # Если в IDE запускается из корня через main, используем Path.cwd()
+            root_dir = Path.cwd()
+
+        # Создаем папку для профиля браузера в надежном месте (например, внутри папки storage)
+        self.user_data_dir = root_dir / "chrome_user_profile"
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Переводим в строку, так как Playwright ожидает именно строковый тип пути (str)
+        self.user_data_dir = str(self.user_data_dir)
 
     def _build_url(self, page: int = 1) -> str:
         """
