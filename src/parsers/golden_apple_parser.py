@@ -19,6 +19,8 @@ from src.my_exceptions.exceptions import ExceptionStopParser
 
 logger = logging.getLogger(__name__)
 
+PROCESS_CANCELLED_MSG = "Процесс отменен пользователем."
+
 PARSER_DESCRIPTION = (
     "-" * 85 + "\n"
     "Парсер добавляет товары в БД из выбранных РАЗДЕЛОВ сайта.\n"
@@ -99,8 +101,8 @@ class GoldenAppleParser(BaseParser):
         except Exception as e:
             # Если пользователь нажал Отмена во время ожидания карточки, мгновенно выходим
             if not self._is_running:
-                raise ExceptionStopParser("Процесс отменен пользователем.") from e
-            logger.error(f"Ошибка. Не удалось дождаться загрузки карточки ID {product_id}: {e}")
+                raise ExceptionStopParser(PROCESS_CANCELLED_MSG) from e
+            logger.exception("Ошибка. Не удалось дождаться загрузки карточки ID %s", product_id)
             if page is not None:
                 page.close()
             return None
@@ -129,10 +131,8 @@ class GoldenAppleParser(BaseParser):
 
         except Exception as e:
             if not self._is_running:
-                raise ExceptionStopParser("Процесс отменен пользователем.") from e
-            logger.error(
-                f"Ошибка. Не удалось прогрузить страницу каталога №{self.current_page}: {str(e).splitlines()[0]}"
-            )
+                raise ExceptionStopParser(PROCESS_CANCELLED_MSG) from e
+            logger.exception("Ошибка. Не удалось прогрузить страницу каталога №%s", self.current_page)
             raise e
 
     def count_and_get_products_on_page(self, page) -> Any:
@@ -151,7 +151,7 @@ class GoldenAppleParser(BaseParser):
             return cards
 
         except Exception as e:
-            logger.error(f"Ошибка. Не удалось определить количество товаров на странице №{self.current_page}: {e}")
+            logger.exception("Ошибка. Не удалось определить количество товаров на странице №%s", self.current_page)
             raise e
 
     def _smart_sleep(self, seconds: float) -> None:
@@ -163,7 +163,7 @@ class GoldenAppleParser(BaseParser):
         while time.time() - start_time < seconds:
             # Если пользователь нажал Стоп в GUI, мгновенно прерываем паузу
             if not self._is_running:
-                raise ExceptionStopParser("Процесс отменен пользователем во время паузы.")
+                raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
             time.sleep(0.1)
 
     def run_parsing(self) -> Generator[List[Dict[str, Any]], None, None]:
@@ -225,7 +225,7 @@ class GoldenAppleParser(BaseParser):
             try:
                 while True:
                     if not self._is_running:
-                        raise ExceptionStopParser("Процесс отменен пользователем.")
+                        raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
 
                     url = self._build_url(self.current_page)
                     to_gui(f"🌐 Загрузка страницы каталога №{self.current_page}...")
@@ -304,7 +304,7 @@ class GoldenAppleParser(BaseParser):
 
                     for idx, item in enumerate(new_base_items, start=1):
                         if not self._is_running:
-                            raise ExceptionStopParser("Процесс отменен пользователем.")
+                            raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
 
                         item["catalog_page_url"] = url
                         product_id = item.get("item_id", "Неизвестен")
@@ -380,10 +380,6 @@ class GoldenAppleParser(BaseParser):
                     # Увеличиваем счетчик страницы ТОЛЬКО после полной обработки текущей
                     self.current_page += 1
 
-            except ExceptionStopParser as e:
-                raise e
-            except Exception as e:
-                raise e
             finally:
                 # Корректная очистка ресурсов: сначала страница, потом контекст
                 if "page" in locals() and not page.is_closed():

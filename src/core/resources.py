@@ -16,7 +16,7 @@ def load_app_icon() -> QIcon:
     Находит на диске и возвращает объект иконки приложения.
     """
     if getattr(sys, "frozen", False):
-        # Безопасно получаем путь к временной папке через getattr, не зля линтер
+        # Безопасно получаем путь к временной папке через getattr
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             root_dir = Path(meipass)
