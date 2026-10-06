@@ -1,6 +1,7 @@
 """Класс парсинга для Сайта Золотое яблоко."""
 
 import os
+import sys
 import time
 import logging
 import re
@@ -488,23 +489,35 @@ class GoldenAppleParser(BaseParser):
             # отключены GPU и WebGL, и об этом знает любая антибот-система.
             # Проверка устройств на goldapple.ru такие браузеры не принимает.
             # Подходит, потому что на сервере уже есть X-сервер (окно PyQt6 видно).
-            # Если DISPLAY отсутствует и Xvfb не запущен — откатываемся на headless.
-            display_available = bool(os.environ.get("DISPLAY"))
+            #
+            # ВАЖНО ДЛЯ WINDOWS: переменной DISPLAY там не бывает в принципе,
+            # но обычный режим браузера работает без всякого X-сервера. Поэтому
+            # проверка только для POSIX, иначе Windows ушёл бы в headless и
+            # сразу получил бы отказ от антибота.
+            display_available = True
+            if sys.platform.startswith("linux"):
+                display_available = bool(os.environ.get("DISPLAY"))
 
             launch_kwargs = dict(
                 user_data_dir=self.user_data_dir,
+                # Графический режим ОБЯЗАТЕЛЕН для прохождения проверки устройств:
+                # в headless отключены GPU и WebGL, и это видно. Поэтому экономия
+                # идёт не через отключение графики, а через запрет тяжёлой отрисовки.
                 headless=not display_available,
                 args=[
                     "--disable-blink-features=AutomationControlled",
-                    "--blink-settings=imagesEnabled=false",
-                    "--no-sandbox",  # ОБЯЗАТЕЛЬНО ДЛЯ LINUX (под root)
-                    "--disable-setuid-sandbox",  # ОБЯЗАТЕЛЬНО ДЛЯ LINUX (под root)
-                    "--disable-dev-shm-usage",  # ОБЯЗАТЕЛЬНО ДЛЯ VPS (память в /dev/shm)
-                    "--disable-gpu",  # ОБЯЗАТЕЛЬНО ДЛЯ СЕРВЕРА (нет видеокарты)
-                    # Признаки headless, которые наоборот привлекают внимание
-                    "--disable-features=IsolateOrigins,site-per-process",
+                    # ЭКОНОМИЯ РЕСУРСОВ. Эти флаги не трогают WebGL и не меняют
+                    # отпечаток устройства — они лишь отключают то, что парсеру
+                    # всё равно не нужно для сбора HTML.
+                    "--blink-settings=imagesEnabled=false",  # картинки не декодируются
+                    "--blink-settings=cssAnimations=false",  # анимации CSS
+                    "--disable-renderer-backgrounding=false",  # не мешаем рендеру
+                    "--force-prefers-reduced-motion",  # сайт меньше анимирует
+                    # ВАЖНО: --disable-gpu убран намеренно. Он отключает WebGL,
+                    # который проверка устройств считает признаком бота. На слабом
+                    # VPS Chromium сам выберет программный рендеринг (SwiftShader).
                 ],
-                viewport={"width": 1920, "height": 1080},
+                viewport={"width": 1366, "height": 768},
                 locale="ru-RU",
                 timezone_id="Europe/Moscow",
                 # locale выставлен выше, поэтому заголовок должен ему соответствовать,
@@ -519,17 +532,27 @@ class GoldenAppleParser(BaseParser):
                 launch_kwargs["proxy"] = proxy_settings
                 logger.info("Используется прокси: %s", proxy_settings.get("server"))
 
-            # Если X-сервера нет и запуск упал — сообщаем это прямо, потому что
-            # без графического окружения проверка устройств не пройдёт.
+            # Флаги, нужные ТОЛЬКО на Linux. На Windows они бессмысленны,
+            # а --no-sandbox там ещё и ослабляет безопасность, поэтому
+            # добавляем их по необходимости, а не всегда.
+            if sys.platform.startswith("linux"):
+                launch_kwargs["args"] += [
+                    "--no-sandbox",  # обязательно при запуске под root
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",  # на VPS /dev/shm ограничен
+                ]
+
+            # Проверка устройств требует обычного браузера, а не headless.
+            # headless используется ТОЛЬКО как вынужденный запасной вариант.
             if display_available:
-                to_gui("🖥 Режим с графическим окружением (Xvfb/дисплей доступен).")
+                to_gui("🖥 Обычный режим браузера — проверка устройств будет пройдена.")
             else:
                 logger.warning(
-                    "DISPLAY не установлен — Chromium запускается в headless. "
-                    "Антибот может отклонять такой браузер. Запустите Xvfb: "
-                    "Xvfb :99 -screen 0 1920x1080x24 & export DISPLAY=:99"
+                    "Графическое окружение недоступно — Chromium запускается в headless. "
+                    "Антибот может отклонить такой браузер. На сервере запустите Xvfb: "
+                    "Xvfb :99 -screen 0 1366x768x24 & export DISPLAY=:99"
                 )
-                to_gui("⚠️ Графического окружения нет — работаем в headless.")
+                to_gui("⚠️ Графического окружения нет — работаем в headless, антибот может отклонить.")
 
             try:
                 context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)
@@ -578,16 +601,55 @@ class GoldenAppleParser(BaseParser):
                     "Проверьте, что в сборку попала папка playwright_stealth/js."
                 )
 
-            # 3. БЛОКИРОВКА КАРТИНОК И ШРИФТОВ — тоже на уровне контекста,
-            #    чтобы действовала и на страницах карточек товаров.
-            context.route(
-                "**/*",
-                lambda route: (
-                    route.abort()
-                    if route.request.resource_type in ["image", "font", "media", "image-set"]
-                    else route.continue_()
-                ),
+            # 3. БЛОКИРОВКА ТЯЖЁЛЫХ РЕСУРСОВ — главный рычаг экономии на слабом VPS.
+            #
+            #    Парсеру нужны только HTML, JSON и CSS. Всё остальное — это чистая
+            #    нагрузка на CPU/RAM: картинки, видео, шрифты, аналитика, счётчики.
+            #    На графическом VPS именно они обычно и съедают ресурсы.
+            #
+            #    ВАЖНО: script и stylesheet НЕ блокируются. Антибот-проверка
+            #    исполняет их, и без них страница остаётся на 'checking device'.
+            blocked_resource_types = {
+                "image",
+                "image-set",
+                "media",
+                "font",
+                "imageset",
+            }
+
+            # Домены аналитики и счётчиков: не нужны для сбора данных.
+            blocked_url_markers = (
+                "googletagmanager",
+                "google-analytics",
+                "analytics",
+                "facebook.net",
+                "mc.yandex",
+                "top-fwz1",
+                "vk.com/rtrg",
+                "criteo",
+                "hotjar",
+                "sentry",
+                "amplitude",
+                "matomo",
             )
+
+            def _handle_route(route) -> None:
+                request = route.request
+
+                if request.resource_type in blocked_resource_types:
+                    route.abort()
+                    return
+
+                url = request.url.lower()
+                if any(marker in url for marker in blocked_url_markers):
+                    route.abort()
+                    return
+
+                route.continue_()
+
+            # Блокировка вешается на контекст, поэтому работает и для страниц
+            # карточек товаров, которые создаются через context.new_page().
+            context.route("**/*", _handle_route)
 
             # 4. ДИАГНОСТИКА СЕТИ: запоминаем HTTP-статус главного документа и
             #    неудачные запросы. Без этого пустую страницу невозможно отличить

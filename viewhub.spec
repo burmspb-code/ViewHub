@@ -15,6 +15,7 @@ PyInstaller spec — ViewHub.
 Результат: dist/viewhub/viewhub  (+ logs/ рядом с бинарником).
 """
 
+import os
 import platform
 import stat
 
@@ -59,18 +60,21 @@ IS_LINUX = platform.system() == "Linux"
 # ПРОВЕРКИ, ЧТОБЫ НЕ СОБИРАТЬ ЗАВЕДОМО СЛОМАННЫЙ БИНАРНИК
 # =============================================================================
 
+# Сборка платформенно-зависима: Chromium из pw-browsers соответствует той ОС,
+# на которой он скачан. Поэтому предупреждаем, но НЕ блокируем сборку —
+# кросс-компиляция всё равно возможна, если браузер уже скачан под нужную ОС.
 if not IS_LINUX:
-    raise SystemExit(
-        "\n[viewhub.spec] Сборка должна выполняться в Linux.\n"
+    print(
+        "\n[viewhub.spec] ВНИМАНИЕ: сборка выполняется не на Linux.\n"
         f"  Текущая ОС: {platform.system()}\n"
-        "  Причина: Playwright Chromium платформенно-зависим. Собранный на Windows\n"
-        "  Chromium внутри Linux-сборки не запустится, и парсер 'зависнет'.\n"
+        "  Если Chromium в папке pw-browsers скачан для другой ОС, бинарник\n"
+        "  не запустится. Для сборки Linux-версии выполняйте её на Linux-машине.\n"
     )
 
 if BUNDLE_BROWSERS and not BROWSERS_DIR.is_dir():
     raise SystemExit(
         f"[viewhub.spec] Не найдена папка с браузерами: {BROWSERS_DIR}\n"
-        "  Выполните на ЭТОЙ ЖЕ Linux-машине:\n"
+        "  Скачайте браузер на ЭТОЙ ЖЕ машине:\n"
         '    PLAYWRIGHT_BROWSERS_PATH="pw-browsers" python -m playwright install chromium\n'
         "  Либо установите BUNDLE_BROWSERS = False в начале этого файла.\n"
     )
@@ -236,6 +240,11 @@ def _fix_permissions():
 
     fixed = []
     dist_dir = Path(DISTPATH).resolve() / "viewhub"
+    # Права +x имеют смысл только на POSIX. На Windows chmod игнорируется,
+    # а на списках файлов может выбросить исключение — поэтому пропускаем.
+    if os.name != "posix":
+        return
+
     for relative in targets:
         path = dist_dir / relative
         if path.is_file():
