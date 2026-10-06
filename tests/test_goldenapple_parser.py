@@ -1,4 +1,6 @@
 import os
+import sys
+
 import pytest
 
 
@@ -500,9 +502,42 @@ class TestRunParsing:
 
     @pytest.fixture(autouse=True)
     def mock_stealth(self, mocker):
-        """Автоматически мокаем playwright_stealth для всех тестов класса."""
+        """
+        Мокаем playwright_stealth для всех тестов класса.
+
+        Мокается именно Stealth().apply_stealth_sync(), потому что в
+        playwright_stealth 2.x функции stealth_sync больше нет. Если бы
+        оставшийся код импортировал несуществующее имя, тесты бы это поймали.
+        """
         mock_stealth_module = mocker.MagicMock()
         mocker.patch.dict("sys.modules", {"playwright_stealth": mock_stealth_module})
+        return mock_stealth_module
+
+    def test_stealth_uses_v2_api(self, mocker):
+        """
+        Проверяет, что вызывается актуальный API playwright_stealth 2.x.
+
+        Регрессия: код делал `from playwright_stealth import stealth_sync`,
+        чего в 2.x нет вообще. Ошибка глоталась try/except, и маскировка
+        не работала нигде — ни при запуске из исходников, ни в сборке.
+        """
+        # autouse-фикстура подменяет sys.modules, поэтому реальный пакет нужно
+        # импортировать ДО подмены — снимаем фикстуру через прямой sys.modules.
+        import importlib
+
+        saved = sys.modules.pop("playwright_stealth", None)
+        try:
+            real_stealth = importlib.import_module("playwright_stealth")
+
+            # Экспортируется класс Stealth, а функции stealth_sync в 2.x нет
+            assert hasattr(real_stealth, "Stealth")
+            assert not hasattr(real_stealth, "stealth_sync")
+
+            # Нужный метод есть у реального класса
+            assert hasattr(real_stealth.Stealth, "apply_stealth_sync")
+        finally:
+            if saved is not None:
+                sys.modules["playwright_stealth"] = saved
 
     @pytest.fixture
     def mock_parser(self, mocker):

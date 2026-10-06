@@ -454,9 +454,16 @@ class GoldenAppleParser(BaseParser):
             # выглядит «зависшим». Молча продолжать работу без маскировки нельзя —
             # это ровно тот случай, который стоит догадываться часами.
             try:
-                from playwright_stealth import stealth_sync
+                # В playwright_stealth 2.x функции stealth_sync/stealth_async
+                # БОЛЬШЕ НЕТ: __init__.py экспортирует только Stealth и
+                # ALL_EVASIONS_DISABLED_KWARGS. Старый код делал
+                #     from playwright_stealth import stealth_sync
+                # что всегда падало с ImportError, а try/except это скрывал —
+                # маскировка не работала НИКОГДА, ни в исходниках, ни в сборке.
+                # Правильный вызов для sync API — Stealth().apply_stealth_sync().
+                from playwright_stealth import Stealth
 
-                stealth_sync(context)
+                Stealth().apply_stealth_sync(context)
                 to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
             except Exception as stealth_err:
                 message = f"Не удалось включить stealth-маскировку: {stealth_err}"
