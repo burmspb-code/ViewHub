@@ -71,6 +71,18 @@ class GoldenAppleParser(BaseParser):
         self._last_document_status: Optional[int] = None
         # Список неудачных сетевых запросов для диагностики.
         self._failed_requests: List[str] = []
+
+        # Активный режим отрисовки фиксируем ЗДЕСЬ, а не только в run_parsing().
+        # Раньше режим выводился в лог исключительно из run_parsing(), а это
+        # генератор, который запускается только по кнопке «НАЧАТЬ». Из-за этого
+        # проверить применение переменной окружения до старта парсинга было
+        # невозможно — в логе просто не было строк. Теперь режим виден сразу
+        # при создании парсера, то есть сразу после открытия раздела «ПАРСИНГ».
+        logger.info(
+            "Режим отрисовки (при создании парсера): %s, GOLDAPPLE_HEADLESS=%s",
+            "headless" if self._resolve_headless() else "обычный браузер",
+            os.environ.get("GOLDAPPLE_HEADLESS", "не задана"),
+        )
         # Создаем папку для профиля браузера:
         # app_root() -> папка рядом с бинарником в frozen-режиме, корень проекта при разработке.
         # ensure_writable() страхует от read-only каталога на сервере: раньше mkdir
@@ -559,6 +571,10 @@ class GoldenAppleParser(BaseParser):
                 "headless" if headless_mode else "обычный браузер",
                 os.environ.get("GOLDAPPLE_HEADLESS", "не задана"),
             )
+            if headless_mode:
+                logger.info(
+                    "Отпечаток headless: User-Agent=Chrome/124, WebGL отключён (--disable-gpu)."
+                )
 
             launch_args = [
                     "--disable-blink-features=AutomationControlled",
