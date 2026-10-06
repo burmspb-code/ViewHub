@@ -282,6 +282,83 @@ class TestStablePageContent:
             parser._stable_page_content(page)
 
 
+class TestBlockDetection:
+    """Тесты определения блокировки и устойчивости к навигации при скролле."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        config = mocker.MagicMock()
+        parser = GoldenAppleParser(
+            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
+        )
+        parser._is_running = True
+        parser.current_page = 1
+        mocker.patch.object(parser, "_smart_sleep", return_value=None)
+        return parser
+
+    @pytest.mark.parametrize("status", [401, 403, 429])
+    def test_detects_http_block(self, parser, status):
+        """HTTP 401/403/429 однозначно говорят о блокировке запроса."""
+        parser._last_document_status = status
+        reason = parser._detect_block_reason()
+        assert reason is not None
+        assert str(status) in reason
+
+    def test_detects_network_failure(self, parser):
+        """Нет ответа при наличии неудачных запросов = проблема с сетью."""
+        parser._last_document_status = None
+        parser._failed_requests = ["document https://goldapple.ru/ :: net::ERR_NAME_NOT_RESOLVED"]
+        reason = parser._detect_block_reason()
+        assert reason is not None
+        assert "ERR_NAME_NOT_RESOLVED" in reason
+
+    def test_no_false_positives_on_normal_status(self, parser):
+        """Успешный ответ 200 не должен считаться блокировкой."""
+        parser._last_document_status = 200
+        parser._failed_requests = []
+        assert parser._detect_block_reason() is None
+
+    def test_scroll_failure_does_not_break_page_load(self, parser, mocker):
+        """
+        Ошибка скролла не должна обрывать парсинг.
+
+        Именно так выглядел прошлый сбой: страница была занята навигацией,
+        page.evaluate() падал с 'Execution context was destroyed' и обрывал
+        весь запуск, хотя потеря скролла не критична.
+        """
+        mock_page = mocker.MagicMock()
+        mock_page.goto.return_value = None
+        mock_page.wait_for_load_state.return_value = None
+        # Карточки не появляются — но блокировки не зафиксировано
+        mock_page.locator.return_value.first.wait_for.side_effect = Exception("Timeout 60000ms exceeded")
+        mock_page.evaluate.side_effect = Exception(
+            "Execution context was destroyed, most likely because of a navigation"
+        )
+        parser._last_document_status = 200
+
+        result = parser.load_catalog_page(page=mock_page, url="https://goldapple.ru/parfjumerija/novinki")
+
+        # Страница возвращена несмотря на упавший скролл
+        assert result == mock_page
+
+    def test_block_raises_clear_stop_message(self, parser, mocker):
+        """При явной блокировке парсер должен остановиться с понятным текстом."""
+        mock_page = mocker.MagicMock()
+        mock_page.goto.return_value = None
+        mock_page.wait_for_load_state.return_value = None
+        mock_page.locator.return_value.first.wait_for.side_effect = Exception("Timeout 60000ms exceeded")
+        mock_page.title.return_value = ""
+        mock_page.inner_text.return_value = ""
+        parser._last_document_status = 403
+
+        with pytest.raises(ExceptionStopParser) as exc_info:
+            parser.load_catalog_page(page=mock_page, url="https://goldapple.ru/parfjumerija/novinki")
+
+        assert "403" in str(exc_info.value)
+        # Скролл не должен был выполняться — до него не дошли
+        mock_page.evaluate.assert_not_called()
+
+
 class TestCountAndGetProductsOnPage:
     @pytest.fixture
     def mock_parser(self, mocker):

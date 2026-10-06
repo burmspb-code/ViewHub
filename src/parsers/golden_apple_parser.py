@@ -9,7 +9,7 @@ import typing
 from contextlib import suppress
 
 from bs4 import BeautifulSoup
-from typing import Any, List, Dict, Generator
+from typing import Any, List, Dict, Generator, Optional
 from playwright.sync_api import sync_playwright
 
 from src.core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
@@ -56,6 +56,10 @@ class GoldenAppleParser(BaseParser):
         self.current_page = 1
         # Счетчик пустых страниц подряд для надежной остановки
         self.empty_pages_count = 0
+        # HTTP-статус последнего загруженного документа (None — запрос не дошёл).
+        self._last_document_status: Optional[int] = None
+        # Список неудачных сетевых запросов для диагностики.
+        self._failed_requests: List[str] = []
         # Создаем папку для профиля браузера:
         # app_root() -> папка рядом с бинарником в frozen-режиме, корень проекта при разработке.
         # ensure_writable() страхует от read-only каталога на сервере: раньше mkdir
@@ -117,21 +121,64 @@ class GoldenAppleParser(BaseParser):
         """
         Короткий слепок состояния страницы для диагностики.
 
-        Нужен, чтобы отличить «каталог не отрендерился» от «нам прислали
-        бот-защиту или 404»: раньше оба случая выглядели одинаково.
+        Раньше здесь стоял suppress на каждый вызов, из-за чего «вызов упал»
+        и «страница пустая» выглядели в логе одинаково — именно поэтому в
+        предыдущем логе title и текст были пустыми, а что произошло на самом
+        деле, осталось неизвестным. Теперь каждая проверка помечена явно.
         """
         parts: List[str] = []
 
+        parts.append(f"http_status={self._last_document_status if self._last_document_status else 'нет ответа'}")
+
         with suppress(Exception):
             parts.append(f"url={page.url}")
-        with suppress(Exception):
-            parts.append(f"title={page.title()!r}")
-        with suppress(Exception):
+
+        try:
+            title = page.title()
+            parts.append(f"title={title!r}")
+        except Exception as e:
+            parts.append(f"title=ошибка({str(e).splitlines()[0]})")
+
+        try:
             body_text = page.inner_text("body", timeout=5000)
             snippet = " ".join(body_text.split())[:200]
-            parts.append(f"текст={snippet!r}")
+            parts.append(f"текст={snippet!r}" if snippet else "текст=СТРАНИЦА ПУСТАЯ")
+        except Exception as e:
+            # Именно этот случай был в прошлом логе: страница была занята навигацией.
+            parts.append(f"текст=не удалось прочитать ({str(e).splitlines()[0]})")
 
-        return " | ".join(parts) if parts else "не удалось получить данные"
+        if self._failed_requests:
+            parts.append(f"неудачные запросы ({len(self._failed_requests)}): {self._failed_requests[:3]}")
+
+        return " | ".join(parts)
+
+    def _detect_block_reason(self) -> Optional[str]:
+        """
+        Возвращает текст причины, если сайт явно заблокировал запрос.
+
+        Пустая страница сама по себе ни о чём не говорит: одинаково выглядят
+        403 от антибота, неудачный DNS и ошибка TLS. Здесь мы разделяем эти
+        случаи, чтобы пользователь получил конкретное сообщение вместо
+        падения через минуту ожидания.
+        """
+        status = self._last_document_status
+
+        if status in (401, 403, 429):
+            return (
+                f"Сайт вернул HTTP {status} — запрос заблокирован защитой. "
+                "Чаще всего это антибот по IP-адресу сервера."
+            )
+
+        if status is not None and status >= 500:
+            return f"Сайт вернул HTTP {status} — проблема на стороне сайта, попробуйте позже."
+
+        if status is None and self._failed_requests:
+            return (
+                "Главный документ не загрузился, сетевые ошибки: "
+                + "; ".join(self._failed_requests[:3])
+            )
+
+        return None
 
     def _stable_page_content(self, page, attempts: int = CONTENT_READ_ATTEMPTS) -> str:
         """
@@ -204,17 +251,33 @@ class GoldenAppleParser(BaseParser):
             except Exception as e:
                 first_line = str(e).splitlines()[0] if str(e) else "Unknown error"
                 # Раньше здесь стоял logger.debug, из-за чего главная проблема
-                # (каталог не отрендерился: бот-защита, редирект, неверный раздел)
-                # была полностью невидима. Поднимаем до warning.
+                # (каталог не отрендерился) была полностью невидима.
                 logger.warning(
                     "Карточки товаров (<article>) не появились на странице каталога №%s: %s",
                     self.current_page,
                     first_line,
                 )
-                logger.warning("Диагностика страницы: %s", self._page_diagnostics(page))
+                diagnostics = self._page_diagnostics(page)
+                logger.warning("Диагностика страницы: %s", diagnostics)
+
+                # Если сайт нас заблокировал или документ не дошёл — сообщаем об этом
+                # сразу и понятно, вместо того чтобы падать позже с непонятной
+                # ошибкой в page.evaluate().
+                block_reason = self._detect_block_reason()
+                if block_reason:
+                    raise ExceptionStopParser(block_reason) from e
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
-            page.evaluate("window.scrollTo(0, 2500);")
+            # Это вспомогательная операция для lazy-render. Раньше её исключение
+            # ("Execution context was destroyed") обрывало весь парсинг,
+            # хотя потеря скролла ничего критичного не означает.
+            try:
+                page.evaluate("window.scrollTo(0, 2500);")
+            except Exception as scroll_err:
+                logger.warning(
+                    "Не удалось выполнить эмуляцию скролла (страница переходит): %s",
+                    str(scroll_err).splitlines()[0],
+                )
             self._smart_sleep(0.3)
 
             # Даем умный сон 3 секунды, чтобы сетка полностью стабилизировалась
@@ -270,7 +333,19 @@ class GoldenAppleParser(BaseParser):
         to_gui("=== ЗАПУСК СКРЫТОГО КОНВЕЙЕРА ПАРСИНГА ===")
 
         with sync_playwright() as p:
-            context = p.chromium.launch_persistent_context(
+            # 1. ЗАПУСК БРАУЗЕРА
+            #
+            # channel="chromium" принципиален: без него Playwright в headless
+            # использует chromium-headless-shell, который в User-Agent отдаёт
+            # "HeadlessChrome" — самый заметный признак автоматизации.
+            # С обычным Chromium включается новый headless-режим, и браузер
+            # называется настоящей версией.
+            #
+            # Раньше здесь был зашит user_agent с "Chrome/124.0.0.0", тогда как
+            # встроенный в Playwright Chromium — 153.x. Разрыв в 29 версий
+            # виден любой антибот-системе, из-за чего сайт отдавал пустую
+            # страницу и не рендерил каталог.
+            launch_kwargs = dict(
                 user_data_dir=self.user_data_dir,
                 headless=True,
                 args=[
@@ -282,21 +357,45 @@ class GoldenAppleParser(BaseParser):
                     "--disable-gpu",  # ОБЯЗАТЕЛЬНО ДЛЯ СЕРВЕРА (нет видеокарты)
                 ],
                 viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                " AppleWebKit/537.36 (KHTML, like Gecko)"
-                " Chrome/124.0.0.0 Safari/537.36",
                 locale="ru-RU",
                 timezone_id="Europe/Moscow",
+                # locale выставлен выше, поэтому заголовок должен ему соответствовать,
+                # иначе это ещё одно расхождение в отпечатке.
+                extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
             )
+
+            try:
+                context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)
+            except Exception as channel_err:
+                # Канал chromium иногда отсутствует при нестандартной сборке.
+                logger.warning(
+                    "Не удалось запустить Chromium с каналом 'chromium' (%s). Пробуем обычный "
+                    "headless-запуск — в UA будет HeadlessChrome.",
+                    str(channel_err).splitlines()[0],
+                )
+                context = p.chromium.launch_persistent_context(**launch_kwargs)
 
             # Очищаем куки и разрешения от предыдущего запуска
             context.clear_cookies()
             context.clear_permissions()
 
-            page = context.new_page()
+            # 2. STEALTH ПРИМЕНЯЕМ К КОНТЕКСТУ, А НЕ К ОДНОЙ СТРАНИЦЕ.
+            #
+            # add_init_script действует только на ту страницу, к которой применён,
+            # и на страницы, созданные из того же контекста ПОСЛЕ этого.
+            # Карточки товаров открываются через context.new_page() уже во время
+            # обхода, поэтому раньше stealth к ним не применялся вовсе.
+            try:
+                from playwright_stealth import stealth_sync
 
-            # 1. БЛОКИРОВКА КАРТИНОК И ШРИФТОВ ДЛЯ СКОРОСТИ И ЭКОНОМИИ ОЗУ (ОСТАВЛЯЕМ)
-            page.route(
+                stealth_sync(context)
+                to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
+            except Exception as stealth_err:
+                logger.warning("Ошибка активации stealth-маскировки: %s", stealth_err)
+
+            # 3. БЛОКИРОВКА КАРТИНОК И ШРИФТОВ — тоже на уровне контекста,
+            #    чтобы действовала и на страницах карточек товаров.
+            context.route(
                 "**/*",
                 lambda route: (
                     route.abort()
@@ -305,14 +404,27 @@ class GoldenAppleParser(BaseParser):
                 ),
             )
 
-            # 2. АКТИВАЦИЯ ПОЛНОГО STEALTH-СЛЕПОК ЧЕРЕЗ БИБЛИОТЕКУ (ОСТАВЛЯЕМ)
-            try:
-                from playwright_stealth import stealth_sync
+            # 4. ДИАГНОСТИКА СЕТИ: запоминаем HTTP-статус главного документа и
+            #    неудачные запросы. Без этого пустую страницу невозможно отличить
+            #    от блокировки антиботом — а это разные проблемы с разным решением.
+            self._last_document_status = None
+            self._failed_requests = []
 
-                stealth_sync(page)
-                to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
-            except Exception as stealth_err:
-                logger.debug(f"Ошибка активации stealth-маскировки: {stealth_err}")
+            def _on_response(response) -> None:
+                if response.request.resource_type == "document":
+                    self._last_document_status = response.status
+
+            def _on_request_failed(request) -> None:
+                # Интересуют только первые несколько, чтобы лог не разрастался
+                if len(self._failed_requests) < 10:
+                    self._failed_requests.append(
+                        f"{request.resource_type} {request.url} :: {request.failure}"
+                    )
+
+            context.on("response", _on_response)
+            context.on("requestfailed", _on_request_failed)
+
+            page = context.new_page()
             # ---------------------------------------------------------------
 
             try:
