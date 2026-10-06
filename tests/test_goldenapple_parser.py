@@ -333,21 +333,22 @@ class TestProxyResolution:
         parser.config.proxy = "10.0.0.1:3128"
         assert parser._resolve_proxy() == {"server": "http://10.0.0.1:3128"}
 
-    def test_headless_defaults_to_windowed_on_windows(self, parser, monkeypatch):
+    def test_headless_is_default_on_both_platforms(self, parser, monkeypatch):
         """
-        На Windows обычный режим выбирается без DISPLAY.
+        headless — режим по умолчанию на обеих платформах.
 
-        Регрессия: проверка выглядела как display_available = bool(DISPLAY).
-        На Windows переменной DISPLAY не бывает, поэтому режим всегда был бы
-        headless — и антибот отклонял бы сессию сразу после моей правки.
+        Изначально по умолчанию выбирался обычный браузер, а headless считался
+        запасным вариантом, который антибот якобы отклоняет. Эксперимент это
+        опроверг: headless проверен и на Windows, и на Linux, а обычный режим
+        к тому же требует графического окружения и расходует больше ресурсов.
         """
         monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
         monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.setattr(sys, "platform", "win32")
+        for platform in ("win32", "linux"):
+            monkeypatch.setattr(sys, "platform", platform)
+            assert parser._resolve_headless() is True, platform
 
-        assert parser._resolve_headless() is False
-
-    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+    @pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
     def test_headless_forced_on(self, parser, monkeypatch, value):
         """Явное значение 1 включает headless на любой платформе."""
         monkeypatch.setenv("GOLDAPPLE_HEADLESS", value)
@@ -357,36 +358,33 @@ class TestProxyResolution:
 
     @pytest.mark.parametrize("value", ["0", "false", "no", "off"])
     def test_headless_forced_off(self, parser, monkeypatch, value):
-        """Явное значение 0 включает обычный режим даже без DISPLAY."""
+        """Явное значение 0 включает обычный режим с отрисовкой."""
         monkeypatch.setenv("GOLDAPPLE_HEADLESS", value)
         monkeypatch.delenv("DISPLAY", raising=False)
         monkeypatch.setattr(sys, "platform", "linux")
 
         assert parser._resolve_headless() is False
 
-    def test_headless_auto_on_linux_without_display(self, parser, monkeypatch):
-        """Без DISPLAY на Linux автоопределение выбирает headless."""
+    def test_headless_default_ignores_display(self, parser, monkeypatch):
+        """
+        Наличие DISPLAY больше не переключает режим.
+
+        Раньше при заданном DISPLAY выбирался обычный браузер, что означало лишний
+        расход ресурсов на VPS. Теперь наличие дисплея на выбор режима не влияет.
+        """
         monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
-        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.setenv("DISPLAY", ":10")
         monkeypatch.setattr(sys, "platform", "linux")
 
         assert parser._resolve_headless() is True
 
-    def test_headless_auto_on_linux_with_display(self, parser, monkeypatch):
-        """С DISPLAY на Linux автоопределение выбирает обычный режим."""
-        monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
-        monkeypatch.setenv("DISPLAY", ":99")
-        monkeypatch.setattr(sys, "platform", "linux")
-
-        assert parser._resolve_headless() is False
-
     def test_headless_ignores_garbage_value(self, parser, monkeypatch):
-        """Мусорное значение не должно ломать запуск — используется автоопределение."""
+        """Мусорное значение не ломает запуск — берётся значение по умолчанию."""
         monkeypatch.setenv("GOLDAPPLE_HEADLESS", "мусор")
-        monkeypatch.setenv("DISPLAY", ":99")
+        monkeypatch.delenv("DISPLAY", raising=False)
         monkeypatch.setattr(sys, "platform", "linux")
 
-        assert parser._resolve_headless() is False
+        assert parser._resolve_headless() is True
 
     def test_flag_env_default_is_false_when_unset(self, parser, monkeypatch):
         """Незаданная переменная даёт False — поведение по умолчанию не меняется."""
@@ -404,19 +402,6 @@ class TestProxyResolution:
         """Ложные и нераспознанные значения выключают флаг — без падения."""
         monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", value)
         assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is False
-
-    def test_headless_user_agent_constant_is_spoofed_chrome_124(self):
-        """
-        Фиксирует результат эксперимента: для headless обязателен Chrome/124.
-
-        Раньше эта подмена была в коде, я счёл её «устаревшим расхождением»
-        и удалил — после чего headless перестал работать. Тест не даёт удалить
-        её снова: проверяется и значение, и отсутствие подмены в окне.
-        """
-        from src.parsers.golden_apple_parser import HEADLESS_USER_AGENT
-
-        assert "Chrome/124" in HEADLESS_USER_AGENT
-        assert "Headless" not in HEADLESS_USER_AGENT
 
     def test_disable_switches_work_in_the_intended_direction(self, parser, monkeypatch):
         """

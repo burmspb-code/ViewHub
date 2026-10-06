@@ -33,6 +33,44 @@ class GoldenAppleConfig(BaseDBParsingConfig):
     # Ключ, по которому сейвер будет делать ON CONFLICT (UPSERT)
     DEDUP_COLUMN: str = "item_id"
 
+    # =====================================================================
+    # Настройки браузера — ТОЛЬКО для парсера Золотого Яблока.
+    #
+    # Эти параметры не имеют отношения к CitadelParser и GardarikaParser:
+    # подмена User-Agent и отключение WebGL выведены из эксперимента именно
+    # на этом сайте. Поэтому объявлены здесь, в конфигурации парсера, а не
+    # как общие настройки приложения.
+    # =====================================================================
+
+    # Режим отрисовки по умолчанию. True — браузер без отрисовки страниц.
+    # Требует подмены HEADLESS_USER_AGENT и добавления --disable-gpu.
+    DEFAULT_HEADLESS: ClassVar[bool] = True
+
+    # Имя переменной окружения для переключения режима отрисовки.
+    HEADLESS_ENV_VAR: ClassVar[str] = "GOLDAPPLE_HEADLESS"
+
+    # User-Agent для режима без отрисовки.
+    #
+    # ВАЖНО: подмена обязательна. С настоящей версией браузера (Chrome/153)
+    # сайт отвечает отказом и парсер не может собрать каталог. Экспериментом
+    # установлено, что именно эта версия проходит проверку. Не «исправлять».
+    HEADLESS_USER_AGENT: ClassVar[str] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        " AppleWebKit/537.36 (KHTML, like Gecko)"
+        " Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    # Требуется ли отключение GPU в режиме без отрисовки.
+    # Без этого флага включается программный рендеринг, который сайт отвергает.
+    HEADLESS_DISABLE_GPU: ClassVar[bool] = True
+
+    # Имена экспериментальных переменных окружения (для разбора отказов).
+    UA_ENV_VAR: ClassVar[str] = "GOLDAPPLE_UA"
+    DISABLE_GPU_ENV_VAR: ClassVar[str] = "GOLDAPPLE_DISABLE_GPU"
+    STEALTH_OFF_ENV_VAR: ClassVar[str] = "GOLDAPPLE_STEALTH_OFF"
+    NO_CHANNEL_ENV_VAR: ClassVar[str] = "GOLDAPPLE_NO_CHANNEL"
+    PROXY_ENV_VAR: ClassVar[str] = "GOLDAPPLE_PROXY"
+
     @classmethod
     def get_full_schema(cls) -> Dict[str, str]:
         """Схема ВСЕХ колонок таблицы: системные + специфичные для сайта."""

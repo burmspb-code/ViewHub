@@ -40,9 +40,14 @@ NAVIGATION_RACE_MARKERS = (
 CONTENT_READ_ATTEMPTS = 5
 CONTENT_RETRY_PAUSE = 1.5
 
-# User-Agent для headless-режима. Подмена обязательна: с настоящей версией
-# (Chrome/153) антибот отвечает отказом. Значение проверено на Windows.
-HEADLESS_USER_AGENT = (
+# Запасной User-Agent для режима без отрисовки.
+#
+# Основное значение хранится в конфигурации парсера —
+# GoldenAppleConfig.HEADLESS_USER_AGENT, а не здесь. Эта подмена относится
+# ТОЛЬКО к Золотому Яблоку: к CitadelParser и GardarikaParser она отношения
+# не имеет. Запасной вариант нужен лишь на случай подмены конфигурации
+# заглушкой в тестах.
+HEADLESS_USER_AGENT_FALLBACK = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     " AppleWebKit/537.36 (KHTML, like Gecko)"
     " Chrome/124.0.0.0 Safari/537.36"
@@ -79,9 +84,10 @@ class GoldenAppleParser(BaseParser):
         # невозможно — в логе просто не было строк. Теперь режим виден сразу
         # при создании парсера, то есть сразу после открытия раздела «ПАРСИНГ».
         logger.info(
-            "Режим отрисовки (при создании парсера): %s, GOLDAPPLE_HEADLESS=%s",
+            "Режим отрисовки (при создании парсера): %s, %s=%s",
             "headless" if self._resolve_headless() else "обычный браузер",
-            os.environ.get("GOLDAPPLE_HEADLESS", "не задана"),
+            self._cfg_str("HEADLESS_ENV_VAR", "GOLDAPPLE_HEADLESS"),
+            os.environ.get(self._cfg_str("HEADLESS_ENV_VAR", "GOLDAPPLE_HEADLESS"), "не задана"),
         )
         # Создаем папку для профиля браузера:
         # app_root() -> папка рядом с бинарником в frozen-режиме, корень проекта при разработке.
@@ -203,6 +209,21 @@ class GoldenAppleParser(BaseParser):
 
         return None
 
+    def _cfg_str(self, name: str, default: str) -> str:
+        """
+        Читает строковую настройку из конфигурации парсера.
+
+        Проверка isinstance обязательна: в тестах конфигурация подменяется
+        MagicMock, и getattr вернул бы объект-заглушку вместо строки.
+        """
+        value = getattr(self.config, name, None)
+        return value if isinstance(value, str) and value else default
+
+    def _cfg_bool(self, name: str, default: bool) -> bool:
+        """Читает булеву настройку из конфигурации парсера."""
+        value = getattr(self.config, name, None)
+        return value if isinstance(value, bool) else default
+
     def _flag_env(self, name: str) -> bool:
         """
         Читает булеву переменную окружения: «1/true/yes/on» -> True.
@@ -220,30 +241,25 @@ class GoldenAppleParser(BaseParser):
         """
         Определяет режим отрисовки браузера.
 
+        По умолчанию используется headless: он проверен на Windows и Linux,
+        проходит антибот-проверку и заметно экономнее по ресурсам. Режим по
+        умолчанию не требует ни X-сервера, ни виртуального дисплея.
+
         Управляется переменной окружения GOLDAPPLE_HEADLESS:
-          "1"/"true"/"yes" — принудительно headless (минимум ресурсов)
-          "0"/"false"/"no"  — принудительно обычный браузер
-          не задана        — автоопределение
+          "1"/"true"/"yes"/"on"  — принудительно headless (то же, что по умолчанию)
+          "0"/"false"/"no"/"off" — обычный браузер с отрисовкой (нужен DISPLAY)
+          не задана              — headless
 
-        Автоопределение: на Linux обычному режиму нужен X-сервер, поэтому при
-        отсутствии DISPLAY включается headless. На Windows обычный режим
-        работает без X-сервера, поэтому там он выбирается всегда.
-
-        Переменная сделана осознанно: она позволяет проверять влияние режима
-        отрисовки на прохождение антибот-проверки без правки кода и пересборки.
+        Ранее по умолчанию выбирался обычный браузер на основании наличия
+        DISPLAY, но эксперимент показал, что headless работает не хуже, а
+        потребляет меньше ресурсов. Поэтому поведение изменено.
         """
-        raw = os.environ.get("GOLDAPPLE_HEADLESS", "").strip().lower()
+        raw = os.environ.get(self._cfg_str("HEADLESS_ENV_VAR", "GOLDAPPLE_HEADLESS"), "").strip().lower()
 
-        if raw in {"1", "true", "yes", "on"}:
-            return True
         if raw in {"0", "false", "no", "off"}:
             return False
 
-        # Автоопределение
-        if sys.platform.startswith("linux"):
-            return not bool(os.environ.get("DISPLAY"))
-
-        return False
+        return self._cfg_bool("DEFAULT_HEADLESS", True)
 
     def _resolve_proxy(self) -> Optional[Dict[str, str]]:
         """
@@ -257,7 +273,7 @@ class GoldenAppleParser(BaseParser):
         Раньше поле прокси было в интерфейсе, но сюда не передавалось, поэтому
         настройка не влияла на работу парсера.
         """
-        raw = os.environ.get("GOLDAPPLE_PROXY", "").strip()
+        raw = os.environ.get(self._cfg_str("PROXY_ENV_VAR", "GOLDAPPLE_PROXY"), "").strip()
         if not raw:
             raw = str(getattr(self.config, "proxy", "") or "").strip()
         if not raw:
@@ -619,7 +635,7 @@ class GoldenAppleParser(BaseParser):
             if headless_mode:
                 launch_args.append("--disable-gpu")
                 logger.info("WebGL отключён (--disable-gpu) — режим headless.")
-            elif self._flag_env("GOLDAPPLE_DISABLE_GPU"):
+            elif self._flag_env(self._cfg_str("DISABLE_GPU_ENV_VAR", "GOLDAPPLE_DISABLE_GPU")):
                 launch_args.append("--disable-gpu")
                 logger.info("WebGL отключён (--disable-gpu).")
 
@@ -638,14 +654,14 @@ class GoldenAppleParser(BaseParser):
             # Подмена User-Agent. В рабочей конфигурации был зашит Chrome/124.
             # Значение можно вернуть через переменную окружения, чтобы проверить
             # влияние версии на результат проверки.
-            custom_ua = os.environ.get("GOLDAPPLE_UA", "").strip()
+            custom_ua = os.environ.get(self._cfg_str("UA_ENV_VAR", "GOLDAPPLE_UA"), "").strip()
 
             if custom_ua:
                 launch_kwargs["user_agent"] = custom_ua
                 logger.info("User-Agent переопределён: %s", custom_ua)
             elif headless_mode:
                 # Подмена обязательна для headless — проверено экспериментом.
-                launch_kwargs["user_agent"] = HEADLESS_USER_AGENT
+                launch_kwargs["user_agent"] = self._cfg_str("HEADLESS_USER_AGENT", HEADLESS_USER_AGENT_FALLBACK)
                 logger.info("User-Agent подменён на Chrome/124 — требуется для headless.")
 
             # Прокси из настроек GUI/конфига. Раньше поле прокси существовало в
@@ -666,17 +682,16 @@ class GoldenAppleParser(BaseParser):
                 ]
 
             if headless_mode:
-                logger.warning(
-                    "Включён headless-режим. Антибот Золотого Яблока может отклонить "
-                    "такой браузер: страница остаётся на 'checking device', каталог не "
-                    "отрисовывается. Если так и произошло, верните обычный режим: "
-                    "снимите переменную GOLDAPPLE_HEADLESS или задайте 0."
-                )
-                to_gui("⚠️ Включён headless — антибот может отклонить сессию.")
+                to_gui("🖥 Headless-режим: графическое окружение не требуется.")
             else:
-                to_gui("🖥 Обычный режим браузера — проверка устройств будет пройдена.")
+                logger.warning(
+                    "Включён обычный режим браузера с отрисовкой. Он расходует больше "
+                    "ресурсов, а headless проверен и работает. Вернуть headless: "
+                    "GOLDAPPLE_HEADLESS=1 (или снимите переменную)."
+                )
+                to_gui("🖥 Обычный режим браузера с отрисовкой.")
 
-            use_channel = not self._flag_env("GOLDAPPLE_NO_CHANNEL")
+            use_channel = not self._flag_env(self._cfg_str("NO_CHANNEL_ENV_VAR", "GOLDAPPLE_NO_CHANNEL"))
 
             if use_channel:
                 try:
@@ -721,7 +736,7 @@ class GoldenAppleParser(BaseParser):
                 # маскировка не работала, и сайт всё равно пропускал. Возможно,
                 # подмены playwright_stealth (userAgentData, sec-ch-ua, WebGL)
                 # противоречат настоящей версии браузера и делают хуже.
-                if not self._flag_env("GOLDAPPLE_STEALTH_OFF"):
+                if not self._flag_env(self._cfg_str("STEALTH_OFF_ENV_VAR", "GOLDAPPLE_STEALTH_OFF")):
                     from playwright_stealth import Stealth
 
                     Stealth().apply_stealth_sync(context)
