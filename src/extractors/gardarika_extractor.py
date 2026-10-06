@@ -4,8 +4,8 @@ from typing import Any, Dict, List
 
 from bs4 import BeautifulSoup
 
-from exceptions import ExceptionStopParser
-from parser_classes import BaseConfig, BaseExtractor
+from my_exceptions.exceptions import ExceptionStopParser
+from src.core.base_classes import BaseConfig, BaseExtractor
 
 
 class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переименовано в GardarikiExtractor
@@ -67,7 +67,7 @@ class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переиме
                 "product_code": code,
                 "product_availability": availability,
                 "product_packaging": packaging,
-                "product_url": url
+                "product_url": url,
             }
 
             # Шаг 5. Добавляем в итоговый список
