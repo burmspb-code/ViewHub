@@ -1,5 +1,6 @@
 """Класс парсинга для Сайта Золотое яблоко."""
 
+import os
 import time
 import logging
 import re
@@ -7,6 +8,7 @@ import random
 import typing
 
 from contextlib import suppress
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator, Optional
@@ -180,58 +182,119 @@ class GoldenAppleParser(BaseParser):
 
         return None
 
-    def _wait_for_challenge_to_pass(self, page, timeout_ms: int = 30000) -> bool:
+    def _resolve_proxy(self) -> Optional[Dict[str, str]]:
         """
-        Ждёт, пока антибот-челлендж разрешится.
+        Собирает настройки прокси из конфига или переменных окружения.
 
-        Признаки челленджа, замеченные на goldapple.ru:
+        Поддерживаются варианты:
+          GOLDAPPLE_PROXY=http://user:pass@host:port   (полный URL)
+          GOLDAPPLE_PROXY=host:port                   (схема подставится http://)
+        Поля proxy_username / proxy_password в конфиге дополняют вариант без логина.
+
+        Раньше поле прокси было в интерфейсе, но сюда не передавалось, поэтому
+        настройка не влияла на работу парсера.
+        """
+        raw = os.environ.get("GOLDAPPLE_PROXY", "").strip()
+        if not raw:
+            raw = str(getattr(self.config, "proxy", "") or "").strip()
+        if not raw:
+            return None
+
+        if "://" not in raw:
+            raw = f"http://{raw}"
+
+        try:
+            parsed = urlparse(raw)
+        except ValueError as err:
+            logger.warning("Некорректный прокси %r: %s. Прокси не применяется.", raw, err)
+            return None
+
+        if not parsed.hostname or not parsed.port:
+            logger.warning(
+                "Не удалось разобрать прокси %r (нужен вид host:port или URL). Прокси не применяется.",
+                raw,
+            )
+            return None
+
+        settings: Dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+
+        username = parsed.username or str(getattr(self.config, "proxy_username", "") or "").strip()
+        password = parsed.password or str(getattr(self.config, "proxy_password", "") or "").strip()
+        if username:
+            settings["username"] = username
+            settings["password"] = password or ""
+
+        return settings
+
+    def _wait_for_challenge_to_pass(self, page, timeout_ms: int = 45000) -> bool:
+        """
+        Ждёт, пока антибот-проверка завершится.
+
+        Признаки проверки на goldapple.ru:
           * HTTP 200, но тело — один UUID вроде '9b858593-3bcb-4bd0-8fcb-f9707aa1dcc0'
-          * title вида 'Loading https://goldapple.ru/...'
+          * title: 'Loading https://goldapple.ru/...', затем 'Gold Apple — checking device'
 
-        Такой странице нужен JS-редирект на настоящий каталог. Если просто ждать
-        <article> 60 секунд, челлендж не успевает отработать и парсер объявляет
-        «данные не обнаружены». Поэтому отдельно ждём либо появления карточек,
-        либо смены заголовка — что наступит раньше.
+        ВАЖНО: 'checking device' — это всё ещё ПРОВЕРОКА, а не каталог.
+        Раньше любая смена заголовка считалась успехом, из-за чего парсер
+        тратил по 60 секунд на каждую попытку и рапортовал «проверка пройдена»,
+        хотя каталог так и не появился.
+
+        Успех — только появление карточек <article>. Если проверка завершилась
+        ошибкой, она остаётся на этой странице и ждать бессмысленно.
         """
         deadline = time.time() + (timeout_ms / 1000)
-        seen = False
+        reported = False
 
         while time.time() < deadline:
             if not self._is_running:
                 raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
 
-            # Карточки появились — челлендж пройден, идём дальше.
+            # Успех есть только один: появились реальные карточки товаров.
             try:
                 if page.locator("article").count() > 0:
+                    if reported:
+                        logger.info("Проверка пройдена, каталог отрисован.")
                     return True
             except Exception as count_err:
-                # Не смогли проверить наличие карточек: скорее всего страница
-                # переходит. Это не повод прерываться — ждём следующей итерации.
+                # Скорее всего страница переходит — ждём следующей итерации.
                 logger.debug("Не удалось проверить наличие карточек: %s", count_err)
 
-            # Заголовок читаем без try/except: если он не читается, значит страница
-            # занята навигацией — это само по себе признак незавершённой проверки.
             try:
                 title = page.title() or ""
             except Exception:
                 title = ""
 
-            is_loading_title = isinstance(title, str) and title.lower().startswith("loading")
+            if not isinstance(title, str):
+                title = ""
 
-            if is_loading_title:
-                if not seen:
-                    logger.info(
-                        "Обнаружена страница проверки (антибот-челлендж): title=%r. "
-                        "Ждём завершения проверки...",
-                        title,
-                    )
-                    seen = True
-            elif seen:
-                # Заголовок сменился — проверка пройдена.
-                logger.info("Проверка пройдена, заголовок страницы: %r", title)
-                return True
+            if not reported:
+                logger.info(
+                    "Обнаружена страница проверки (антибот): title=%r. Ждём завершения...",
+                    title,
+                )
+                reported = True
 
             self._smart_sleep(1.0)
+
+        # Проверка не завершилась за отведённое время. Сообщаем, на чём остановились:
+        # если заголовок всё ещё про проверку, антибот нас не пустил.
+        try:
+            final_title = page.title() or ""
+        except Exception:
+            final_title = ""
+
+        if "checking device" in final_title.lower():
+            logger.warning(
+                "Антибот-проверка не завершилась: устройство не прошло проверку "
+                "(title=%r). Каталог недоступен с этого IP.",
+                final_title,
+            )
+        else:
+            logger.warning(
+                "Каталог не отрисовался за %s мс. Итоговый заголовок: %r",
+                timeout_ms // 1000,
+                final_title,
+            )
 
         return False
 
@@ -313,8 +376,8 @@ class GoldenAppleParser(BaseParser):
                     first_line,
                 )
 
-                # Возможно, мы попали на антибот-челлендж и просто не дождались
-                # его завершения — даём ему ещё один шанс перед вердиктом.
+                # Возможно, мы попали на антибот-проверку и просто не дождались
+                # её завершения — даём ей ещё один шанс перед вердиктом.
                 if self._wait_for_challenge_to_pass(page):
                     logger.info(
                         "Каталог отрисован после прохождения проверки (страница №%s)", self.current_page
@@ -323,12 +386,23 @@ class GoldenAppleParser(BaseParser):
                     diagnostics = self._page_diagnostics(page)
                     logger.warning("Диагностика страницы: %s", diagnostics)
 
-                    # Если сайт нас заблокировал или документ не дошёл — сообщаем
-                    # об этом сразу и понятно, вместо падения позже с непонятной
-                    # ошибкой в page.evaluate().
                     block_reason = self._detect_block_reason()
                     if block_reason:
                         raise ExceptionStopParser(block_reason) from e
+
+                    # Проверка устройства не завершилась — дальше ждать бессмысленно,
+                    # каждая страница каталога будет упираться в тот же антибот.
+                    # Останавливаемся сразу, вместо ~2 минут бесполезного ожидания.
+                    try:
+                        final_title = (page.title() or "").lower()
+                    except Exception:
+                        final_title = ""
+
+                    if "checking device" in final_title:
+                        raise ExceptionStopParser(
+                            "Антибот не пускает: проверка устройства не пройдена. "
+                            "Нужен другой IP-адрес или residential-прокси."
+                        ) from e
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
             # Это вспомогательная операция для lazy-render. Раньше её исключение
@@ -408,9 +482,18 @@ class GoldenAppleParser(BaseParser):
             # встроенный в Playwright Chromium — 153.x. Разрыв в 29 версий
             # виден любой антибот-системе, из-за чего сайт отдавал пустую
             # страницу и не рендерил каталог.
+            #
+            # РЕЖИМ ОТРИСОВКИ. По умолчанию пробуем обычный браузер (headless=False),
+            # потому что headless-режим сам по себе — заметный признак автоматизации:
+            # отключены GPU и WebGL, и об этом знает любая антибот-система.
+            # Проверка устройств на goldapple.ru такие браузеры не принимает.
+            # Подходит, потому что на сервере уже есть X-сервер (окно PyQt6 видно).
+            # Если DISPLAY отсутствует и Xvfb не запущен — откатываемся на headless.
+            display_available = bool(os.environ.get("DISPLAY"))
+
             launch_kwargs = dict(
                 user_data_dir=self.user_data_dir,
-                headless=True,
+                headless=not display_available,
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--blink-settings=imagesEnabled=false",
@@ -418,6 +501,8 @@ class GoldenAppleParser(BaseParser):
                     "--disable-setuid-sandbox",  # ОБЯЗАТЕЛЬНО ДЛЯ LINUX (под root)
                     "--disable-dev-shm-usage",  # ОБЯЗАТЕЛЬНО ДЛЯ VPS (память в /dev/shm)
                     "--disable-gpu",  # ОБЯЗАТЕЛЬНО ДЛЯ СЕРВЕРА (нет видеокарты)
+                    # Признаки headless, которые наоборот привлекают внимание
+                    "--disable-features=IsolateOrigins,site-per-process",
                 ],
                 viewport={"width": 1920, "height": 1080},
                 locale="ru-RU",
@@ -426,6 +511,25 @@ class GoldenAppleParser(BaseParser):
                 # иначе это ещё одно расхождение в отпечатке.
                 extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
             )
+
+            # Прокси из настроек GUI/конфига. Раньше поле прокси существовало в
+            # интерфейсе, но в парсер никогда не передавалось.
+            proxy_settings = self._resolve_proxy()
+            if proxy_settings:
+                launch_kwargs["proxy"] = proxy_settings
+                logger.info("Используется прокси: %s", proxy_settings.get("server"))
+
+            # Если X-сервера нет и запуск упал — сообщаем это прямо, потому что
+            # без графического окружения проверка устройств не пройдёт.
+            if display_available:
+                to_gui("🖥 Режим с графическим окружением (Xvfb/дисплей доступен).")
+            else:
+                logger.warning(
+                    "DISPLAY не установлен — Chromium запускается в headless. "
+                    "Антибот может отклонять такой браузер. Запустите Xvfb: "
+                    "Xvfb :99 -screen 0 1920x1080x24 & export DISPLAY=:99"
+                )
+                to_gui("⚠️ Графического окружения нет — работаем в headless.")
 
             try:
                 context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)

@@ -286,6 +286,59 @@ class TestStablePageContent:
             parser._stable_page_content(page)
 
 
+class TestProxyResolution:
+    """Тесты разбора настроек прокси.
+
+    Раньше поле прокси было в интерфейсе, но в парсер не передавалось, поэтому
+    настройка молча не влияла на работу.
+    """
+
+    @pytest.fixture
+    def parser(self, mocker, monkeypatch):
+        monkeypatch.delenv("GOLDAPPLE_PROXY", raising=False)
+        config = mocker.MagicMock()
+        config.proxy = ""
+        config.proxy_username = ""
+        config.proxy_password = ""
+        parser = GoldenAppleParser(
+            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
+        )
+        return parser
+
+    def test_returns_none_when_not_configured(self, parser):
+        """Прокси не задан — возвращаем None, браузер идёт напрямую."""
+        assert parser._resolve_proxy() is None
+
+    def test_adds_scheme_to_host_port(self, parser, monkeypatch):
+        """Вид host:port без схемы должен работать."""
+        monkeypatch.setenv("GOLDAPPLE_PROXY", "host.example:8080")
+        assert parser._resolve_proxy() == {"server": "http://host.example:8080"}
+
+    def test_parses_credentials(self, parser, monkeypatch):
+        """Логин и пароль извлекаются из URL."""
+        monkeypatch.setenv("GOLDAPPLE_PROXY", "http://user:pass@1.2.3.4:9000")
+        assert parser._resolve_proxy() == {
+            "server": "http://1.2.3.4:9000",
+            "username": "user",
+            "password": "pass",
+        }
+
+    def test_supports_socks_scheme(self, parser, monkeypatch):
+        """SOCKS-схема не должна переписываться на http."""
+        monkeypatch.setenv("GOLDAPPLE_PROXY", "socks5://5.6.7.8:1080")
+        assert parser._resolve_proxy() == {"server": "socks5://5.6.7.8:1080"}
+
+    def test_falls_back_to_config_value(self, parser):
+        """Если переменной окружения нет, берём значение из конфига."""
+        parser.config.proxy = "10.0.0.1:3128"
+        assert parser._resolve_proxy() == {"server": "http://10.0.0.1:3128"}
+
+    def test_ignores_malformed_value(self, parser, monkeypatch):
+        """Некорректный прокси не должен ломать запуск парсера."""
+        monkeypatch.setenv("GOLDAPPLE_PROXY", "broken")
+        assert parser._resolve_proxy() is None
+
+
 class TestBlockDetection:
     """Тесты определения блокировки и устойчивости к навигации при скролле."""
 
@@ -387,20 +440,37 @@ class TestChallengeWait:
 
         assert parser._wait_for_challenge_to_pass(page, timeout_ms=2000) is True
 
-    def test_waits_until_loading_title_changes(self, parser, mocker):
-        """
-        Сценарий из лога: title='Loading https://...' и тело-UUID.
-
-        Челлендж должен завершиться сменой заголовка — и мы это ловим.
-        """
+    def test_tolerates_unreadable_title(self, parser, mocker):
+        """Заголовок может не читаться во время навигации — это не повод падать."""
         page = mocker.MagicMock()
-        page.locator.return_value.count.return_value = 0
-        # Сначала Loading, затем нормальный заголовок
-        page.title.side_effect = ["Loading https://goldapple.ru/parfjumerija", "Золотое Яблоко"]
+        page.locator.return_value.count.side_effect = [
+            Exception("Execution context was destroyed"),
+            Exception("Execution context was destroyed"),
+            5,  # на третьей итерации карточки появились
+        ]
+        page.title.side_effect = Exception("cannot read title during navigation")
 
         mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
 
         assert parser._wait_for_challenge_to_pass(page, timeout_ms=5000) is True
+
+    def test_still_waiting_when_title_changes_to_checking_device(self, parser, mocker):
+        """
+        Регрессия из лога: title='Gold Apple — checking device'.
+
+        Это всё ещё проверка, а не каталог. Раньше любая смена заголовка
+        считалась успехом, поэтому парсер рапортовал «проверка пройдена»
+        и тратил по 60 секунд на каждую страницу. Теперь успех — только
+        появление карточек <article>.
+        """
+        page = mocker.MagicMock()
+        # Карточек нет — проверка не пройдена
+        page.locator.return_value.count.return_value = 0
+        page.title.side_effect = ["Loading https://goldapple.ru/parfjumerija", "Gold Apple — checking device"]
+
+        mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=50) is False
 
     def test_returns_false_on_timeout(self, parser, mocker):
         """Если проверка так и не завершилась — возвращаем False, а не вечный цикл."""
