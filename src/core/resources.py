@@ -2,11 +2,11 @@
 Модуль для управления внешними ресурсами (иконки, изображения, шрифты) приложения ViewHub.
 """
 
-import sys
 import logging
-from pathlib import Path
 
 from PyQt6.QtGui import QIcon
+
+from src.core.paths import bundle_root
 
 logger = logging.getLogger()
 
@@ -15,15 +15,9 @@ def load_app_icon() -> QIcon:
     """
     Находит на диске и возвращает объект иконки приложения.
     """
-    if getattr(sys, "frozen", False):
-        # Безопасно получаем путь к временной папке через getattr
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            root_dir = Path(meipass)
-        else:
-            root_dir = Path(sys.executable).resolve().parent
-    else:
-        root_dir = Path.cwd()
+    # Ресурсы лежат в корне сборки (onedir -> _internal, onefile -> /tmp),
+    # а не рядом с исполняемым файлом. Логика вынесена в src.core.paths.
+    root_dir = bundle_root()
 
     # Точный путь, как у вас на скриншоте
     icon_path = root_dir / "src" / "core" / "assets" / "app_icon.png"

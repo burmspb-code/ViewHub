@@ -1,18 +1,17 @@
 """Класс парсинга для Сайта Золотое яблоко."""
 
-import sys
 import time
 import logging
 import re
 import random
 import typing
 
-from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
 
 from src.core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
+from src.core.paths import app_root, ensure_writable
 from src.database.sqlite_manager import DatabaseManager
 from src.my_exceptions.exceptions import ExceptionStopParser
 
@@ -41,20 +40,10 @@ class GoldenAppleParser(BaseParser):
         # Счетчик пустых страниц подряд для надежной остановки
         self.empty_pages_count = 0
         # Создаем папку для профиля браузера:
-        # Определяем корень проекта/папку с .exe в зависимости от режима запуска
-        if getattr(sys, "frozen", False):
-            # В PyInstaller используем директорию с exe файлом
-            root_dir = Path(sys.executable).resolve().parent
-        else:
-            # Если в IDE запускается из корня через main, используем Path.cwd()
-            root_dir = Path.cwd()
-
-        # Создаем папку для профиля браузера в надежном месте
-        self.user_data_dir = root_dir / "chrome_user_profile"
-        self.user_data_dir.mkdir(parents=True, exist_ok=True)
-
-        # Переводим в строку, так как Playwright ожидает именно строковый тип пути (str)
-        self.user_data_dir = str(self.user_data_dir)
+        # app_root() -> папка рядом с бинарником в frozen-режиме, корень проекта при разработке.
+        # ensure_writable() страхует от read-only каталога на сервере: раньше mkdir
+        # бросал PermissionError прямо во время парсинга.
+        self.user_data_dir = str(ensure_writable(app_root() / "chrome_user_profile"))
 
     def _build_url(self, page: int = 1) -> str:
         """

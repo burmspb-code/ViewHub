@@ -1,19 +1,38 @@
+"""
+Инициализация пакета src.
+
+Выполняется автоматически при первом импорте `src` (в том числе из
+`main.py`), до создания QApplication. Здесь настраивается логирование
+и определяется путь к браузерам Playwright.
+"""
+
 import os
-import sys
 import logging
 
 from dotenv import load_dotenv
-from src.core.logger import setup_logger
 
-# Этот код сработает автоматически при первом импорте из папки src
+from src.core.logger import setup_logger
+from src.core.paths import resolve_playwright_browsers_path
+
+logger = logging.getLogger(__name__)
+
+# .env читается первым, чтобы пользователь мог задать пути переопределением.
 load_dotenv()
+
 setup_logger(name="", level=logging.INFO)
 
-# Если приложение скомпилировано в PyInstaller
-if getattr(sys, "frozen", False):
-    # На Windows задаем путь к локальному AppData пользователя
-    if sys.platform.startswith("win"):
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(os.environ["LOCALAPPDATA"], "ms-playwright")
-    # На Linux задаем путь к кэшу root, как мы настраивали на сервере
-    elif sys.platform.startswith("linux"):
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/root/.cache/ms-playwright"
+# Путь к Chromium для Playwright.
+# Раньше здесь стоял жёстко зашитый '/root/.cache/ms-playwright' для Linux,
+# из-за чего упакованный в бинарник браузер игнорировался, а запуск
+# от непривилегированного пользователя падал. Теперь путь вычисляется
+# в src.core.paths с проверкой существования каталога.
+_browsers_path = resolve_playwright_browsers_path()
+
+if _browsers_path is not None:
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_browsers_path)
+    logger.info("Каталог браузеров Playwright: %s", _browsers_path)
+else:
+    logger.warning(
+        "Каталог браузеров Playwright не найден. Установите Chromium на сервере "
+        "(python -m playwright install chromium) или задайте PLAYWRIGHT_BROWSERS_PATH в .env"
+    )

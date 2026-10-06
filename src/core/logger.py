@@ -1,7 +1,11 @@
 import logging
+
 from logging import Logger
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
+
+from src.core.paths import app_root, ensure_writable
 
 # Отключаем DEBUG и INFO спам от сетевых библиотек и asyncio глобально
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -57,24 +61,58 @@ class QTextEditHandler(logging.Handler):
             self.signals.append_log.emit(msg)
 
 
+def _resolve_log_dir() -> Path:
+    """
+    Каталог для файловых логов рядом с приложением.
+
+    Если рядом с бинарником писать нельзя (read-only каталог на сервере),
+    используем временный каталог, иначе логирование падало бы на старте.
+    """
+    return ensure_writable(app_root() / "logs")
+
+
 def setup_logger(name: str = "", level: int = logging.INFO) -> Logger:
-    """Инициализирует базовые параметры логгера."""
+    """
+    Инициализирует базовые параметры логгера.
+
+    Для корневого логгера (name == "") дополнительно создаётся файловый
+    обработчик. Раньше файловых логов не было вовсе, поэтому в собранном
+    приложении падение парсера было невозможно диагностировать: всё уходило
+    только в QTextEdit, а исключение внутри QThread не доходит до sys.excepthook.
+    """
     logger = logging.getLogger(name)
     logger.setLevel(level)
+
+    # Файловый обработчик добавляем только для корневого логгера и только один раз.
+    if name == "" and not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+        file_handler = logging.FileHandler(
+            str(_resolve_log_dir() / "viewhub.log"),
+            encoding="utf-8",
+            delay=True,
+        )
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        logger.addHandler(file_handler)
+
     return logger
 
 
 def register_gui_handler(log_display_widget, level: int = logging.INFO):
     """
-    Безопасно находит корневой логгер, очищает старые хэндлеры
-    и жестко привязывает графическое окно.
+    Безопасно находит корневой логгер и жестко привязывает графическое окно.
+
+    Удаляется ТОЛЬКО предыдущий QTextEditHandler. Раньше здесь вызывался
+    handlers.clear(), который удалял и файловый обработчик — из-за чего
+    логи в файл не попадали ни при каких настройках.
     """
     root_logger = logging.getLogger("")
     root_logger.setLevel(level)
 
-    # Очищаем только старые хэндлеры, чтобы не было дублей
-    if root_logger.handlers:
-        root_logger.handlers.clear()
+    # Убираем только старые GUI-обработчики, файловый логгер сохраняем.
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, QTextEditHandler):
+            root_logger.removeHandler(handler)
 
     # Создаем и добавляем наш QTextEditHandler
     qt_handler = QTextEditHandler(log_display_widget)
