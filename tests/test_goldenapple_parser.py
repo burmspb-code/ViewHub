@@ -160,6 +160,8 @@ class TestLoadCatalogPage:
         """2. Сценарий сбоя article: если карточки не ответили, код скроллит дальше."""
         # Перехватываем логгер, чтобы проверить запись о проблеме
         mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
+        # Ожидание челленджа здесь не проверяется — отключаем, чтобы тест был быстрым
+        mocker.patch.object(mock_parser, "_wait_for_challenge_to_pass", return_value=False)
 
         mock_page = mocker.MagicMock()
 
@@ -335,6 +337,8 @@ class TestBlockDetection:
             "Execution context was destroyed, most likely because of a navigation"
         )
         parser._last_document_status = 200
+        # Челлендж тут не проверяется — отключаем ожидание
+        mocker.patch.object(parser, "_wait_for_challenge_to_pass", return_value=False)
 
         result = parser.load_catalog_page(page=mock_page, url="https://goldapple.ru/parfjumerija/novinki")
 
@@ -350,6 +354,8 @@ class TestBlockDetection:
         mock_page.title.return_value = ""
         mock_page.inner_text.return_value = ""
         parser._last_document_status = 403
+        # Челлендж не проходит — проверяем именно сообщение о блокировке
+        mocker.patch.object(parser, "_wait_for_challenge_to_pass", return_value=False)
 
         with pytest.raises(ExceptionStopParser) as exc_info:
             parser.load_catalog_page(page=mock_page, url="https://goldapple.ru/parfjumerija/novinki")
@@ -357,6 +363,62 @@ class TestBlockDetection:
         assert "403" in str(exc_info.value)
         # Скролл не должен был выполняться — до него не дошли
         mock_page.evaluate.assert_not_called()
+
+
+class TestChallengeWait:
+    """Тесты ожидания прохождения антибот-челленджа."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        config = mocker.MagicMock()
+        parser = GoldenAppleParser(
+            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
+        )
+        parser._is_running = True
+        return parser
+
+    def test_returns_true_when_articles_appear(self, parser, mocker):
+        """Если карточки появились — проверка пройдена, ждать дальше не нужно."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 12
+        page.title.return_value = "Золотое Яблоко — Парфюмерия"
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=2000) is True
+
+    def test_waits_until_loading_title_changes(self, parser, mocker):
+        """
+        Сценарий из лога: title='Loading https://...' и тело-UUID.
+
+        Челлендж должен завершиться сменой заголовка — и мы это ловим.
+        """
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 0
+        # Сначала Loading, затем нормальный заголовок
+        page.title.side_effect = ["Loading https://goldapple.ru/parfjumerija", "Золотое Яблоко"]
+
+        mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=5000) is True
+
+    def test_returns_false_on_timeout(self, parser, mocker):
+        """Если проверка так и не завершилась — возвращаем False, а не вечный цикл."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 0
+        page.title.return_value = "Loading https://goldapple.ru/parfjumerija"
+
+        mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=50) is False
+
+    def test_respects_cancel(self, parser, mocker):
+        """Отмена должна прерывать и ожидание проверки."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 0
+        page.title.return_value = "Loading https://goldapple.ru"
+        parser._is_running = False
+
+        with pytest.raises(ExceptionStopParser):
+            parser._wait_for_challenge_to_pass(page, timeout_ms=5000)
 
 
 class TestCountAndGetProductsOnPage:

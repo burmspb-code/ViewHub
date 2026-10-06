@@ -180,6 +180,61 @@ class GoldenAppleParser(BaseParser):
 
         return None
 
+    def _wait_for_challenge_to_pass(self, page, timeout_ms: int = 30000) -> bool:
+        """
+        Ждёт, пока антибот-челлендж разрешится.
+
+        Признаки челленджа, замеченные на goldapple.ru:
+          * HTTP 200, но тело — один UUID вроде '9b858593-3bcb-4bd0-8fcb-f9707aa1dcc0'
+          * title вида 'Loading https://goldapple.ru/...'
+
+        Такой странице нужен JS-редирект на настоящий каталог. Если просто ждать
+        <article> 60 секунд, челлендж не успевает отработать и парсер объявляет
+        «данные не обнаружены». Поэтому отдельно ждём либо появления карточек,
+        либо смены заголовка — что наступит раньше.
+        """
+        deadline = time.time() + (timeout_ms / 1000)
+        seen = False
+
+        while time.time() < deadline:
+            if not self._is_running:
+                raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
+
+            # Карточки появились — челлендж пройден, идём дальше.
+            try:
+                if page.locator("article").count() > 0:
+                    return True
+            except Exception as count_err:
+                # Не смогли проверить наличие карточек: скорее всего страница
+                # переходит. Это не повод прерываться — ждём следующей итерации.
+                logger.debug("Не удалось проверить наличие карточек: %s", count_err)
+
+            # Заголовок читаем без try/except: если он не читается, значит страница
+            # занята навигацией — это само по себе признак незавершённой проверки.
+            try:
+                title = page.title() or ""
+            except Exception:
+                title = ""
+
+            is_loading_title = isinstance(title, str) and title.lower().startswith("loading")
+
+            if is_loading_title:
+                if not seen:
+                    logger.info(
+                        "Обнаружена страница проверки (антибот-челлендж): title=%r. "
+                        "Ждём завершения проверки...",
+                        title,
+                    )
+                    seen = True
+            elif seen:
+                # Заголовок сменился — проверка пройдена.
+                logger.info("Проверка пройдена, заголовок страницы: %r", title)
+                return True
+
+            self._smart_sleep(1.0)
+
+        return False
+
     def _stable_page_content(self, page, attempts: int = CONTENT_READ_ATTEMPTS) -> str:
         """
         Надёжно снимает HTML страницы, переживая гонку с навигацией.
@@ -257,15 +312,23 @@ class GoldenAppleParser(BaseParser):
                     self.current_page,
                     first_line,
                 )
-                diagnostics = self._page_diagnostics(page)
-                logger.warning("Диагностика страницы: %s", diagnostics)
 
-                # Если сайт нас заблокировал или документ не дошёл — сообщаем об этом
-                # сразу и понятно, вместо того чтобы падать позже с непонятной
-                # ошибкой в page.evaluate().
-                block_reason = self._detect_block_reason()
-                if block_reason:
-                    raise ExceptionStopParser(block_reason) from e
+                # Возможно, мы попали на антибот-челлендж и просто не дождались
+                # его завершения — даём ему ещё один шанс перед вердиктом.
+                if self._wait_for_challenge_to_pass(page):
+                    logger.info(
+                        "Каталог отрисован после прохождения проверки (страница №%s)", self.current_page
+                    )
+                else:
+                    diagnostics = self._page_diagnostics(page)
+                    logger.warning("Диагностика страницы: %s", diagnostics)
+
+                    # Если сайт нас заблокировал или документ не дошёл — сообщаем
+                    # об этом сразу и понятно, вместо падения позже с непонятной
+                    # ошибкой в page.evaluate().
+                    block_reason = self._detect_block_reason()
+                    if block_reason:
+                        raise ExceptionStopParser(block_reason) from e
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
             # Это вспомогательная операция для lazy-render. Раньше её исключение
@@ -385,13 +448,24 @@ class GoldenAppleParser(BaseParser):
             # и на страницы, созданные из того же контекста ПОСЛЕ этого.
             # Карточки товаров открываются через context.new_page() уже во время
             # обхода, поэтому раньше stealth к ним не применялся вовсе.
+            #
+            # Ошибку здесь поднимаем до ERROR и показываем в GUI: без маскировки
+            # navigator.webdriver == true, сайт отдаёт антибот-челлендж, и парсер
+            # выглядит «зависшим». Молча продолжать работу без маскировки нельзя —
+            # это ровно тот случай, который стоит догадываться часами.
             try:
                 from playwright_stealth import stealth_sync
 
                 stealth_sync(context)
                 to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
             except Exception as stealth_err:
-                logger.warning("Ошибка активации stealth-маскировки: %s", stealth_err)
+                message = f"Не удалось включить stealth-маскировку: {stealth_err}"
+                logger.error(message)
+                to_gui(f"⚠️ {message}")
+                logger.error(
+                    "Без маскировки парсер почти наверняка будет заблокирован сайтом. "
+                    "Проверьте, что в сборку попала папка playwright_stealth/js."
+                )
 
             # 3. БЛОКИРОВКА КАРТИНОК И ШРИФТОВ — тоже на уровне контекста,
             #    чтобы действовала и на страницах карточек товаров.

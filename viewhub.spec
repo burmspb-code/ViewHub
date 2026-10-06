@@ -105,6 +105,17 @@ datas += _pw_datas
 binaries += _pw_binaries
 hiddenimports += _pw_hidden
 
+# --- 1a. playwright_stealth: ТОЖЕ ОБЯЗАТЕЛЕН, иначе маскировка молча отключается.
+#
+# В stealth.py (строки 20-42) файлы evasions/*.js читаются через
+#     (Path(__file__).parent / "js" / name).read_text()
+# на уровне МОДУЛЯ, то есть в момент import. Если папка js/ не попала в сборку,
+# импорт падает с FileNotFoundError, а код оборачивает его в try/except —
+# и парсер продолжает работу ПОЛНОСТЬЮ БЕЗ МАСКИРОВКИ, при этом
+# navigator.webdriver остаётся равным true. Сайт отвечает антибот-челленджем,
+# каталог не рендерится, и всё выглядит как «зависание парсера».
+datas += collect_all("playwright_stealth")[0]
+
 datas += copy_metadata("playwright")
 
 # --- 2. Динамические импорты, которые не находит статический анализ.
