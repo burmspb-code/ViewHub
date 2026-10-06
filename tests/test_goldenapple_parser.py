@@ -333,6 +333,118 @@ class TestProxyResolution:
         parser.config.proxy = "10.0.0.1:3128"
         assert parser._resolve_proxy() == {"server": "http://10.0.0.1:3128"}
 
+    def test_headless_defaults_to_windowed_on_windows(self, parser, monkeypatch):
+        """
+        На Windows обычный режим выбирается без DISPLAY.
+
+        Регрессия: проверка выглядела как display_available = bool(DISPLAY).
+        На Windows переменной DISPLAY не бывает, поэтому режим всегда был бы
+        headless — и антибот отклонял бы сессию сразу после моей правки.
+        """
+        monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        assert parser._resolve_headless() is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+    def test_headless_forced_on(self, parser, monkeypatch, value):
+        """Явное значение 1 включает headless на любой платформе."""
+        monkeypatch.setenv("GOLDAPPLE_HEADLESS", value)
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        assert parser._resolve_headless() is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+    def test_headless_forced_off(self, parser, monkeypatch, value):
+        """Явное значение 0 включает обычный режим даже без DISPLAY."""
+        monkeypatch.setenv("GOLDAPPLE_HEADLESS", value)
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        assert parser._resolve_headless() is False
+
+    def test_headless_auto_on_linux_without_display(self, parser, monkeypatch):
+        """Без DISPLAY на Linux автоопределение выбирает headless."""
+        monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        assert parser._resolve_headless() is True
+
+    def test_headless_auto_on_linux_with_display(self, parser, monkeypatch):
+        """С DISPLAY на Linux автоопределение выбирает обычный режим."""
+        monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
+        monkeypatch.setenv("DISPLAY", ":99")
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        assert parser._resolve_headless() is False
+
+    def test_headless_ignores_garbage_value(self, parser, monkeypatch):
+        """Мусорное значение не должно ломать запуск — используется автоопределение."""
+        monkeypatch.setenv("GOLDAPPLE_HEADLESS", "мусор")
+        monkeypatch.setenv("DISPLAY", ":99")
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        assert parser._resolve_headless() is False
+
+    def test_flag_env_default_is_false_when_unset(self, parser, monkeypatch):
+        """Незаданная переменная даёт False — поведение по умолчанию не меняется."""
+        monkeypatch.delenv("GOLDAPPLE_STEALTH_OFF", raising=False)
+        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+    def test_flag_env_enabled(self, parser, monkeypatch, value):
+        """Истинные значения включают флаг."""
+        monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", value)
+        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "off", "мусор"])
+    def test_flag_env_disabled(self, parser, monkeypatch, value):
+        """Ложные и нераспознанные значения выключают флаг — без падения."""
+        monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", value)
+        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is False
+
+    def test_headless_user_agent_constant_is_spoofed_chrome_124(self):
+        """
+        Фиксирует результат эксперимента: для headless обязателен Chrome/124.
+
+        Раньше эта подмена была в коде, я счёл её «устаревшим расхождением»
+        и удалил — после чего headless перестал работать. Тест не даёт удалить
+        её снова: проверяется и значение, и отсутствие подмены в окне.
+        """
+        from src.parsers.golden_apple_parser import HEADLESS_USER_AGENT
+
+        assert "Chrome/124" in HEADLESS_USER_AGENT
+        assert "Headless" not in HEADLESS_USER_AGENT
+
+    def test_disable_switches_work_in_the_intended_direction(self, parser, monkeypatch):
+        """
+        Регрессия: переменные отключения работали НАОБОРОТ.
+
+        Раньше код использовал `not _flag_env(..., invert=True)`, то есть
+        двойное отрицание. В результате GOLDAPPLE_STEALTH=0 включал маскировку,
+        а GOLDAPPLE_NO_CHANNEL=1 оставлял канал включённым — эксперимент
+        проверял не ту конфигурацию, и результаты были неинтерпретируемы.
+        """
+        monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", "1")
+        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is True
+        # Маскировка применяется, только если переменная НЕ задана
+        stealth_applied = not parser._flag_env("GOLDAPPLE_STEALTH_OFF")
+        assert stealth_applied is False
+
+        monkeypatch.delenv("GOLDAPPLE_STEALTH_OFF", raising=False)
+        stealth_applied = not parser._flag_env("GOLDAPPLE_STEALTH_OFF")
+        assert stealth_applied is True
+
+        monkeypatch.setenv("GOLDAPPLE_NO_CHANNEL", "1")
+        use_channel = not parser._flag_env("GOLDAPPLE_NO_CHANNEL")
+        assert use_channel is False
+
+        monkeypatch.delenv("GOLDAPPLE_NO_CHANNEL", raising=False)
+        use_channel = not parser._flag_env("GOLDAPPLE_NO_CHANNEL")
+        assert use_channel is True
+
     def test_ignores_malformed_value(self, parser, monkeypatch):
         """Некорректный прокси не должен ломать запуск парсера."""
         monkeypatch.setenv("GOLDAPPLE_PROXY", "broken")

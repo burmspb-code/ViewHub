@@ -40,6 +40,14 @@ NAVIGATION_RACE_MARKERS = (
 CONTENT_READ_ATTEMPTS = 5
 CONTENT_RETRY_PAUSE = 1.5
 
+# User-Agent для headless-режима. Подмена обязательна: с настоящей версией
+# (Chrome/153) антибот отвечает отказом. Значение проверено на Windows.
+HEADLESS_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    " AppleWebKit/537.36 (KHTML, like Gecko)"
+    " Chrome/124.0.0.0 Safari/537.36"
+)
+
 PARSER_DESCRIPTION = (
     "-" * 85 + "\n"
     "Парсер добавляет товары в БД из выбранных РАЗДЕЛОВ сайта.\n"
@@ -182,6 +190,48 @@ class GoldenAppleParser(BaseParser):
             )
 
         return None
+
+    def _flag_env(self, name: str) -> bool:
+        """
+        Читает булеву переменную окружения: «1/true/yes/on» -> True.
+
+        Пустое, отсутствующее или нераспознанное значение даёт False.
+        ВАЖНО: здесь нет параметра invert. Раньше он был, и при использовании
+        вместе с `not` давал двойное отрицание — переменная работала наоборот,
+        из-за чего эксперимент проверял не ту конфигурацию. Если нужно
+        «отключить», переменная должна так и называться: GOLDAPPLE_STEALTH_OFF.
+        """
+        raw = os.environ.get(name, "").strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    def _resolve_headless(self) -> bool:
+        """
+        Определяет режим отрисовки браузера.
+
+        Управляется переменной окружения GOLDAPPLE_HEADLESS:
+          "1"/"true"/"yes" — принудительно headless (минимум ресурсов)
+          "0"/"false"/"no"  — принудительно обычный браузер
+          не задана        — автоопределение
+
+        Автоопределение: на Linux обычному режиму нужен X-сервер, поэтому при
+        отсутствии DISPLAY включается headless. На Windows обычный режим
+        работает без X-сервера, поэтому там он выбирается всегда.
+
+        Переменная сделана осознанно: она позволяет проверять влияние режима
+        отрисовки на прохождение антибот-проверки без правки кода и пересборки.
+        """
+        raw = os.environ.get("GOLDAPPLE_HEADLESS", "").strip().lower()
+
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        if raw in {"0", "false", "no", "off"}:
+            return False
+
+        # Автоопределение
+        if sys.platform.startswith("linux"):
+            return not bool(os.environ.get("DISPLAY"))
+
+        return False
 
     def _resolve_proxy(self) -> Optional[Dict[str, str]]:
         """
@@ -426,7 +476,15 @@ class GoldenAppleParser(BaseParser):
         except Exception as e:
             if not self._is_running:
                 raise ExceptionStopParser(PROCESS_CANCELLED_MSG) from e
-            logger.exception("Ошибка. Не удалось прогрузить страницу каталога №%s", self.current_page)
+            # Для ExceptionStopParser уже была выведена понятная причина
+            # (например, отказ антибот-проверки). Трейсбек Playwright с
+            # TimeoutError ничего не добавляет и только засоряет лог.
+            if isinstance(e, ExceptionStopParser):
+                logger.warning(
+                    "Загрузка страницы каталога №%s прекращена: %s", self.current_page, str(e).splitlines()[0]
+                )
+            else:
+                logger.exception("Ошибка. Не удалось прогрузить страницу каталога №%s", self.current_page)
             raise e
 
     def count_and_get_products_on_page(self, page) -> Any:
@@ -479,32 +537,30 @@ class GoldenAppleParser(BaseParser):
             # С обычным Chromium включается новый headless-режим, и браузер
             # называется настоящей версией.
             #
-            # Раньше здесь был зашит user_agent с "Chrome/124.0.0.0", тогда как
-            # встроенный в Playwright Chromium — 153.x. Разрыв в 29 версий
-            # виден любой антибот-системе, из-за чего сайт отдавал пустую
-            # страницу и не рендерил каталог.
+            # РАНЬШЕЙ ВЕРСИИ БЫЛА ОШИБКА: здесь стоял зашитый user_agent с
+            # "Chrome/124.0.0.0", и я счёл его устаревшим расхождением и убрал.
+            # На самом деле подмена обязательна для headless-режима: с
+            # настоящим Chrome/153 сайт отдаёт отказ, с Chrome/124 — пропускает.
+            # См. константу HEADLESS_USER_AGENT и комментарий ниже.
             #
-            # РЕЖИМ ОТРИСОВКИ. По умолчанию пробуем обычный браузер (headless=False),
-            # потому что headless-режим сам по себе — заметный признак автоматизации:
-            # отключены GPU и WebGL, и об этом знает любая антибот-система.
-            # Проверка устройств на goldapple.ru такие браузеры не принимает.
-            # Подходит, потому что на сервере уже есть X-сервер (окно PyQt6 видно).
+            # РЕЖИМ ОТРИСОВКИ.
             #
-            # ВАЖНО ДЛЯ WINDOWS: переменной DISPLAY там не бывает в принципе,
-            # но обычный режим браузера работает без всякого X-сервера. Поэтому
-            # проверка только для POSIX, иначе Windows ушёл бы в headless и
-            # сразу получил бы отказ от антибота.
-            display_available = True
-            if sys.platform.startswith("linux"):
-                display_available = bool(os.environ.get("DISPLAY"))
+            # Управляется переменной окружения GOLDAPPLE_HEADLESS, что позволяет
+            # проводить эксперимент, не правя код и не пересобирая бинарник:
+            #   GOLDAPPLE_HEADLESS=1 — принудительно headless (экономия ресурсов)
+            #   GOLDAPPLE_HEADLESS=0 — принудительно обычный браузер
+            #   не задана            — автоопределение (по умолчанию)
+            #
+            # Автоопределение: на Linux требуется DISPLAY, на Windows обычный режим
+            # работает без X-сервера, поэтому проверка только для POSIX.
+            headless_mode = self._resolve_headless()
+            logger.info(
+                "Режим отрисовки: %s (GOLDAPPLE_HEADLESS=%s)",
+                "headless" if headless_mode else "обычный браузер",
+                os.environ.get("GOLDAPPLE_HEADLESS", "не задана"),
+            )
 
-            launch_kwargs = dict(
-                user_data_dir=self.user_data_dir,
-                # Графический режим ОБЯЗАТЕЛЕН для прохождения проверки устройств:
-                # в headless отключены GPU и WebGL, и это видно. Поэтому экономия
-                # идёт не через отключение графики, а через запрет тяжёлой отрисовки.
-                headless=not display_available,
-                args=[
+            launch_args = [
                     "--disable-blink-features=AutomationControlled",
                     # ЭКОНОМИЯ РЕСУРСОВ. Эти флаги не трогают WebGL и не меняют
                     # отпечаток устройства — они лишь отключают то, что парсеру
@@ -513,10 +569,48 @@ class GoldenAppleParser(BaseParser):
                     "--blink-settings=cssAnimations=false",  # анимации CSS
                     "--disable-renderer-backgrounding=false",  # не мешаем рендеру
                     "--force-prefers-reduced-motion",  # сайт меньше анимирует
-                    # ВАЖНО: --disable-gpu убран намеренно. Он отключает WebGL,
-                    # который проверка устройств считает признаком бота. На слабом
-                    # VPS Chromium сам выберет программный рендеринг (SwiftShader).
-                ],
+                ]
+
+            # Факторы, влияющие на прохождение антибот-проверки, вынесены в
+            # переменные окружения. Причина: при переводе парсера на текущую
+            # конфигурацию изменялось сразу несколько параметров, из-за чего
+            # непонятно, какой именно вызывает отказ. Теперь каждый можно
+            # переключить отдельно, не пересобирая бинарник.
+            #
+            # Исходно (рабочая конфигурация) stealth был СЛОМАН: в playwright_stealth
+            # 2.x нет функции stealth_sync, импорт падал и подавлялся. То есть
+            # navigator.webdriver был равен true, и сайт всё равно пропускал.
+            # Стоит проверить, не вредят ли подмены playwright_stealth.
+
+            # ОТПЕЧАТОК БРАУЗЕРА зависит от режима отрисовки.
+            #
+            # Это установлено экспериментально, а не догадками. На Windows
+            # проверялись две конфигурации, и обе работают, но они РАЗНЫЕ:
+            #
+            #   окно     -> настоящий UA, GPU включён          (проверено на Linux)
+            #   headless -> подменный UA Chrome/124, GPU выкл   (проверено на Windows)
+            #
+            # Что важно: в headless подмена UA не «устарела», а наоборот
+            # необходима. Без неё (настоящий Chrome/153) сайт отдаёт
+            # 'checking device'. Ранее здесь стоял зашитый Chrome/124, и я
+            # счёл его ошибкой и убрал — из-за чего headless перестал работать.
+            #
+            # --disable-gpu в headless тоже нужен: без него включается
+            # программный рендеринг SwiftShader, который и отвергают.
+            #
+            # Причина такого поведения для бота неясна, вероятно он проверяет
+            # согласованность сигналов с заявленной версией.
+            if headless_mode:
+                launch_args.append("--disable-gpu")
+                logger.info("WebGL отключён (--disable-gpu) — режим headless.")
+            elif self._flag_env("GOLDAPPLE_DISABLE_GPU"):
+                launch_args.append("--disable-gpu")
+                logger.info("WebGL отключён (--disable-gpu).")
+
+            launch_kwargs = dict(
+                user_data_dir=self.user_data_dir,
+                headless=headless_mode,
+                args=launch_args,
                 viewport={"width": 1366, "height": 768},
                 locale="ru-RU",
                 timezone_id="Europe/Moscow",
@@ -524,6 +618,19 @@ class GoldenAppleParser(BaseParser):
                 # иначе это ещё одно расхождение в отпечатке.
                 extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
             )
+
+            # Подмена User-Agent. В рабочей конфигурации был зашит Chrome/124.
+            # Значение можно вернуть через переменную окружения, чтобы проверить
+            # влияние версии на результат проверки.
+            custom_ua = os.environ.get("GOLDAPPLE_UA", "").strip()
+
+            if custom_ua:
+                launch_kwargs["user_agent"] = custom_ua
+                logger.info("User-Agent переопределён: %s", custom_ua)
+            elif headless_mode:
+                # Подмена обязательна для headless — проверено экспериментом.
+                launch_kwargs["user_agent"] = HEADLESS_USER_AGENT
+                logger.info("User-Agent подменён на Chrome/124 — требуется для headless.")
 
             # Прокси из настроек GUI/конфига. Раньше поле прокси существовало в
             # интерфейсе, но в парсер никогда не передавалось.
@@ -542,27 +649,32 @@ class GoldenAppleParser(BaseParser):
                     "--disable-dev-shm-usage",  # на VPS /dev/shm ограничен
                 ]
 
-            # Проверка устройств требует обычного браузера, а не headless.
-            # headless используется ТОЛЬКО как вынужденный запасной вариант.
-            if display_available:
-                to_gui("🖥 Обычный режим браузера — проверка устройств будет пройдена.")
+            if headless_mode:
+                logger.warning(
+                    "Включён headless-режим. Антибот Золотого Яблока может отклонить "
+                    "такой браузер: страница остаётся на 'checking device', каталог не "
+                    "отрисовывается. Если так и произошло, верните обычный режим: "
+                    "снимите переменную GOLDAPPLE_HEADLESS или задайте 0."
+                )
+                to_gui("⚠️ Включён headless — антибот может отклонить сессию.")
             else:
-                logger.warning(
-                    "Графическое окружение недоступно — Chromium запускается в headless. "
-                    "Антибот может отклонить такой браузер. На сервере запустите Xvfb: "
-                    "Xvfb :99 -screen 0 1366x768x24 & export DISPLAY=:99"
-                )
-                to_gui("⚠️ Графического окружения нет — работаем в headless, антибот может отклонить.")
+                to_gui("🖥 Обычный режим браузера — проверка устройств будет пройдена.")
 
-            try:
-                context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)
-            except Exception as channel_err:
-                # Канал chromium иногда отсутствует при нестандартной сборке.
-                logger.warning(
-                    "Не удалось запустить Chromium с каналом 'chromium' (%s). Пробуем обычный "
-                    "headless-запуск — в UA будет HeadlessChrome.",
-                    str(channel_err).splitlines()[0],
-                )
+            use_channel = not self._flag_env("GOLDAPPLE_NO_CHANNEL")
+
+            if use_channel:
+                try:
+                    context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)
+                except Exception as channel_err:
+                    # Канал chromium иногда отсутствует при нестандартной сборке.
+                    logger.warning(
+                        "Не удалось запустить Chromium с каналом 'chromium' (%s). Пробуем обычный "
+                        "headless-запуск — в UA будет HeadlessChrome.",
+                        str(channel_err).splitlines()[0],
+                    )
+                    context = p.chromium.launch_persistent_context(**launch_kwargs)
+            else:
+                logger.info("Канал 'chromium' отключён (GOLDAPPLE_NO_CHANNEL).")
                 context = p.chromium.launch_persistent_context(**launch_kwargs)
 
             # Очищаем куки и разрешения от предыдущего запуска
@@ -588,10 +700,18 @@ class GoldenAppleParser(BaseParser):
                 # что всегда падало с ImportError, а try/except это скрывал —
                 # маскировка не работала НИКОГДА, ни в исходниках, ни в сборке.
                 # Правильный вызов для sync API — Stealth().apply_stealth_sync().
-                from playwright_stealth import Stealth
+                #
+                # ВАЖНО ДЛЯ ЭКСПЕРИМЕНТА: в исходной рабочей конфигурации
+                # маскировка не работала, и сайт всё равно пропускал. Возможно,
+                # подмены playwright_stealth (userAgentData, sec-ch-ua, WebGL)
+                # противоречат настоящей версии браузера и делают хуже.
+                if not self._flag_env("GOLDAPPLE_STEALTH_OFF"):
+                    from playwright_stealth import Stealth
 
-                Stealth().apply_stealth_sync(context)
-                to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
+                    Stealth().apply_stealth_sync(context)
+                    to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
+                else:
+                    logger.info("Stealth-маскировка отключена (GOLDAPPLE_STEALTH_OFF=1).")
             except Exception as stealth_err:
                 message = f"Не удалось включить stealth-маскировку: {stealth_err}"
                 logger.error(message)

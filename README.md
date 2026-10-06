@@ -380,9 +380,42 @@ ExecStart=/root/ViewHub/dist/viewhub/viewhub
 |---|---|
 | `DB_PATH_PARSING` | Путь к файлу базы данных |
 | `GOLDAPPLE_PROXY` | Прокси для парсинга. Форматы: `host:port`, `http://user:pass@host:port`, `socks5://host:port` |
+| `GOLDAPPLE_HEADLESS` | Режим отрисовки браузера (см. ниже) |
+| `PLAYWRIGHT_BROWSERS_PATH` | Каталог с Chromium. Задаётся в `.env`, см. `src/core/paths.py` |
 
 ```bash
 export GOLDAPPLE_PROXY=http://user:pass@residential-proxy:8080
+```
+
+### 🧪 Эксперимент: режим отрисовки браузера
+
+Переменная `GOLDAPPLE_HEADLESS` переключает режим отрисовки **без правки кода и без пересборки**:
+
+| Значение | Режим |
+|---|---|
+| не задана | автоопределение (рекомендуется) |
+| `1`, `true`, `yes`, `on` | принудительно **headless** — минимальное потребление ресурсов |
+| `0`, `false`, `no`, `off` | принудительно обычный браузер |
+
+**PowerShell:**
+```powershell
+$env:GOLDAPPLE_HEADLESS="1"
+.\dist\viewhub\viewhub.exe
+```
+
+**Linux (Bash):**
+```bash
+export GOLDAPPLE_HEADLESS=1
+./dist/viewhub/viewhub
+```
+
+Автоопределение работает так: на Linux обычному режиму требуется X-сервер, поэтому при отсутствии `DISPLAY` включается headless; на Windows обычный режим выбирается всегда, так как X-сервер не нужен.
+
+> ⚠️ **Ожидайте отказ антибота.** В headless-режиме проверка устройств Золотого Яблока, как правило, не проходит: страница остаётся на `Gold Apple — checking device`, каталог не отрисовывается, парсер завершается с «данные не обнаружены». Эксперимент полезен, чтобы **измерить** это на конкретной машине: если headless заработает, ресурсы VPS можно снижать существенно.
+
+Активный режим всегда виден в логе:
+```
+Режим отрисовки: headless (GOLDAPPLE_HEADLESS=1)
 ```
 
 ### ⚙️ Внутренняя механика сборки (Для разработчиков):
