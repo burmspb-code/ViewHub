@@ -158,7 +158,7 @@ class TestLoadCatalogPage:
 
     def test_load_catalog_inner_timeout_ignored(self, mock_parser, mocker):
         """2. Сценарий сбоя article: если карточки не ответили, код скроллит дальше."""
-        # Перехватываем логгер, чтобы проверить debug-запись
+        # Перехватываем логгер, чтобы проверить запись о проблеме
         mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
 
         mock_page = mocker.MagicMock()
@@ -169,9 +169,17 @@ class TestLoadCatalogPage:
         # Вызываем метод (он не должен упасть благодаря внутреннему try/except)
         result = mock_parser.load_catalog_page(page=mock_page, url="https://goldapple.ru")
 
-        # Проверяем, что логгер зафиксировал отладочную информацию
-        mock_logger.debug.assert_called_once()
-        assert "Загрузка тегов для товара не отвечает: Timeout 60000ms expired" in mock_logger.debug.call_args[0][0]
+        # Проверяем, что проблема зафиксирована на уровне warning.
+        # Раньше здесь стоял logger.debug, из-за чего главная проблема
+        # (каталог не отрендерился) была полностью невидима в логах.
+        assert mock_logger.warning.call_count >= 1
+        # Разворачиваем %s-аргументы, иначе в тексте останутся плейсхолдеры
+        logged = " ".join(
+            (str(call.args[0]) % call.args[1:]) if len(call.args) > 1 else str(call.args[0])
+            for call in mock_logger.warning.call_args_list
+        )
+        assert "не появились на странице каталога" in logged
+        assert "Timeout 60000ms expired" in logged
 
         # Важно: скролл и сны ВСЁ РАВНО должны отработать
         mock_page.evaluate.assert_called_once_with("window.scrollTo(0, 2500);")
@@ -213,6 +221,65 @@ class TestLoadCatalogPage:
         # Проверяем логирование: текст должен взять только первую строчку ошибки и номер страницы
         mock_logger.error.assert_called_once()
         assert "Ошибка. Не удалось прогрузить страницу каталога №5: Fatal Error" in mock_logger.error.call_args[0][0]
+
+
+class TestStablePageContent:
+    """Тесты устойчивого чтения HTML в условиях гонки с навигацией SPA."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        config = mocker.MagicMock()
+        parser = GoldenAppleParser(
+            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
+        )
+        parser._is_running = True
+        # Убираем паузу между попытками, чтобы тест был быстрым
+        mocker.patch.object(parser, "_smart_sleep", return_value=None)
+        return parser
+
+    RACE_ERROR = (
+        "Unable to retrieve content because the page is navigating and changing the content."
+    )
+
+    def test_retries_and_succeeds_on_navigation_race(self, parser, mocker):
+        """Гонка с навигацией — не повод падать: повтор должен вернуть HTML."""
+        page = mocker.MagicMock()
+        page.content.side_effect = [Exception(self.RACE_ERROR), Exception(self.RACE_ERROR), "<html>ok</html>"]
+
+        assert parser._stable_page_content(page) == "<html>ok</html>"
+        assert page.content.call_count == 3
+
+    def test_no_retry_on_unrelated_error(self, parser, mocker):
+        """Настоящая ошибка не должна маскироваться бессмысленными повторами."""
+        page = mocker.MagicMock()
+        page.content.side_effect = Exception("net::ERR_CONNECTION_REFUSED")
+
+        with pytest.raises(Exception) as exc_info:
+            parser._stable_page_content(page)
+
+        assert "net::ERR_CONNECTION_REFUSED" in str(exc_info.value)
+        # Ровно одна попытка — повтор тут не поможет
+        assert page.content.call_count == 1
+
+    def test_raises_after_exhausting_attempts(self, parser, mocker):
+        """Если гонка не проходит, выбрасываем внятную ошибку, а не голую Playwright."""
+        page = mocker.MagicMock()
+        page.content.side_effect = Exception(self.RACE_ERROR)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            parser._stable_page_content(page, attempts=3)
+
+        assert "3 попыток" in str(exc_info.value)
+        assert page.content.call_count == 3
+
+    def test_respects_user_cancel(self, parser, mocker):
+        """Отмена пользователем должна срабатывать и на повторах."""
+        page = mocker.MagicMock()
+        page.content.side_effect = Exception(self.RACE_ERROR)
+        parser._is_running = False
+
+        with pytest.raises(ExceptionStopParser):
+            parser._stable_page_content(page)
 
 
 class TestCountAndGetProductsOnPage:

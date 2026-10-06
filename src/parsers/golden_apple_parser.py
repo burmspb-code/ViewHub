@@ -6,6 +6,8 @@ import re
 import random
 import typing
 
+from contextlib import suppress
+
 from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator
 from playwright.sync_api import sync_playwright
@@ -19,6 +21,21 @@ from src.my_exceptions.exceptions import ExceptionStopParser
 logger = logging.getLogger(__name__)
 
 PROCESS_CANCELLED_MSG = "Процесс отменен пользователем."
+
+# Playwright выбрасывает эту ошибку, когда во время вычисления
+# document.documentElement.outerHTML страница начинает новую навигацию и
+# execution context уничтожается. Золотое Яблоко — SPA, который после
+# domcontentloaded делает клиентский редирект/гидратацию, поэтому гонка
+# стабильно воспроизводится и просто обязана быть пережита повтором.
+NAVIGATION_RACE_MARKERS = (
+    "navigating and changing the content",
+    "Execution context was destroyed",
+    "Target closed",
+)
+
+# Сколько раз пробуем снять HTML, прежде чем считать это реальной ошибкой.
+CONTENT_READ_ATTEMPTS = 5
+CONTENT_RETRY_PAUSE = 1.5
 
 PARSER_DESCRIPTION = (
     "-" * 85 + "\n"
@@ -96,18 +113,105 @@ class GoldenAppleParser(BaseParser):
                 page.close()
             return None
 
+    def _page_diagnostics(self, page) -> str:
+        """
+        Короткий слепок состояния страницы для диагностики.
+
+        Нужен, чтобы отличить «каталог не отрендерился» от «нам прислали
+        бот-защиту или 404»: раньше оба случая выглядели одинаково.
+        """
+        parts: List[str] = []
+
+        with suppress(Exception):
+            parts.append(f"url={page.url}")
+        with suppress(Exception):
+            parts.append(f"title={page.title()!r}")
+        with suppress(Exception):
+            body_text = page.inner_text("body", timeout=5000)
+            snippet = " ".join(body_text.split())[:200]
+            parts.append(f"текст={snippet!r}")
+
+        return " | ".join(parts) if parts else "не удалось получить данные"
+
+    def _stable_page_content(self, page, attempts: int = CONTENT_READ_ATTEMPTS) -> str:
+        """
+        Надёжно снимает HTML страницы, переживая гонку с навигацией.
+
+        Playwright выполняет document.documentElement.outerHTML в utility-мире.
+        Если в этот момент SPA инициирует новый переход (клиентский редирект,
+        гидратация, смена роута), execution context уничтожается и page.content()
+        падает с ошибкой:
+            "Unable to retrieve content because the page is navigating and
+             changing the content."
+
+        Это не поломка парсера, а штатная гонка. Лечится повтором: ждём
+        окончания навигации и пробуем снова.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(1, attempts + 1):
+            # Проверка отмены до каждой попытки, иначе отмена не сработает.
+            if not self._is_running:
+                raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
+
+            try:
+                return page.content()
+            except Exception as e:
+                last_error = e
+                error_text = str(e)
+
+                is_race = any(marker in error_text for marker in NAVIGATION_RACE_MARKERS)
+                if not is_race:
+                    # Это уже не гонка — настоящая ошибка, повтор не поможет.
+                    raise
+
+                if attempt == attempts:
+                    break
+
+                logger.warning(
+                    "Страница переходит в режиме навигации во время чтения HTML "
+                    "(попытка %s/%s). Ждём стабилизации и пробуем снова.",
+                    attempt,
+                    attempts,
+                )
+
+                # Даём навигации завершиться: load_state не бросит исключение,
+                # если состояние уже достигнуто, а ожидание синхронизирует нас
+                # с движением страницы.
+                with suppress(Exception):
+                    page.wait_for_load_state("load", timeout=15000)
+
+                self._smart_sleep(CONTENT_RETRY_PAUSE)
+
+        raise RuntimeError(
+            f"Не удалось прочитать HTML страницы после {attempts} попыток: {last_error}"
+        ) from last_error
+
     def load_catalog_page(self, page, url: str) -> Any:
         """Загрузка страницы каталога с защитой от Lazy-Render скрытого режима."""
         try:
             # Загружаем переданный URL
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
+            # Дожидаемся полной загрузки. Без этого page.content() ниже нередко
+            # попадает ровно в момент клиентского редиректа SPA и падает.
+            with suppress(Exception):
+                page.wait_for_load_state("load", timeout=30000)
+
             # Ждем прикрепления тега в DOM (attached)
             try:
                 page.locator("article").first.wait_for(state="attached", timeout=60000)
             except Exception as e:
                 first_line = str(e).splitlines()[0] if str(e) else "Unknown error"
-                logger.debug(f"Загрузка тегов для товара не отвечает: {first_line}")
+                # Раньше здесь стоял logger.debug, из-за чего главная проблема
+                # (каталог не отрендерился: бот-защита, редирект, неверный раздел)
+                # была полностью невидима. Поднимаем до warning.
+                logger.warning(
+                    "Карточки товаров (<article>) не появились на странице каталога №%s: %s",
+                    self.current_page,
+                    first_line,
+                )
+                logger.warning("Диагностика страницы: %s", self._page_diagnostics(page))
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
             page.evaluate("window.scrollTo(0, 2500);")
@@ -131,7 +235,7 @@ class GoldenAppleParser(BaseParser):
         """
         try:
             # Извлекаем текущий HTML из оперативной памяти вкладки
-            html_content = page.content()
+            html_content = self._stable_page_content(page)
             soup = BeautifulSoup(html_content, "html.parser")
 
             # Находим контейнеры карточек по логике тегов <article>
@@ -333,7 +437,7 @@ class GoldenAppleParser(BaseParser):
 
                         if detail_page:
                             try:
-                                html_content = detail_page.content()
+                                html_content = self._stable_page_content(detail_page)
                                 deep_data = self.extractor.extract_deep_data(html_content)
                                 to_gui(f"    └─ ✅ Характеристики собраны! Страна: {deep_data['country_of_origin']}")
                             except Exception as e:
