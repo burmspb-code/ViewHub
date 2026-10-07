@@ -1,9 +1,106 @@
 import logging
 import os
+import pytest
+
 from PyQt6.QtWidgets import QTextEdit
 from unittest.mock import MagicMock
 
-from src.core.logger import QTextEditHandler, register_gui_handler, setup_logger
+from src.core.logger import (
+    LOG_BACKUP_COUNT,
+    QTextEditHandler,
+    register_gui_handler,
+    reset_log_file,
+    setup_logger,
+)
+
+
+@pytest.fixture
+def isolated_log(tmp_path, monkeypatch):
+    """Изолированный файловый лог во временном каталоге."""
+    from src.core import logger as logger_module
+
+    monkeypatch.setattr(logger_module, "_resolve_log_dir", lambda: tmp_path)
+
+    root_logger = logging.getLogger("")
+    original_handlers = list(root_logger.handlers)
+    original_level = root_logger.level
+    root_logger.handlers.clear()
+
+    setup_logger(name="", level=logging.INFO)
+
+    yield tmp_path / "viewhub.log"
+
+    for handler in list(root_logger.handlers):
+        handler.close()
+    root_logger.handlers.clear()
+    for handler in original_handlers:
+        root_logger.addHandler(handler)
+    root_logger.setLevel(original_level)
+
+
+def test_reset_log_file_clears_previous_session(isolated_log):
+    """Лог должен обнуляться на старте сеанса парсинга."""
+    logging.getLogger("test").info("запись из прошлого сеанса")
+    assert isolated_log.exists()
+
+    assert reset_log_file() is True
+
+    logging.getLogger("test").info("запись из текущего сеанса")
+    content = isolated_log.read_text(encoding="utf-8")
+
+    assert "прошлого сеанса" not in content
+    assert "текущего сеанса" in content
+
+
+def test_reset_log_file_keeps_handler_usable(isolated_log):
+    """После обнуления логгер должен продолжать писать."""
+    logging.getLogger("test").info("до обнуления")
+    reset_log_file()
+    logging.getLogger("test").info("после обнуления")
+
+    content = isolated_log.read_text(encoding="utf-8")
+    assert "после обнуления" in content
+
+
+def test_log_is_rotated_not_grown_forever(tmp_path, monkeypatch):
+    """Лог ограничен по размеру: иначе на сервере он съест диск."""
+    from logging.handlers import RotatingFileHandler
+
+    from src.core import logger as logger_module
+
+    monkeypatch.setattr(logger_module, "_resolve_log_dir", lambda: tmp_path)
+
+    root_logger = logging.getLogger("")
+    original_handlers = list(root_logger.handlers)
+    root_logger.handlers.clear()
+
+    try:
+        setup_logger(name="", level=logging.INFO)
+        rotating = [h for h in root_logger.handlers if isinstance(h, RotatingFileHandler)]
+
+        assert rotating, "должен быть обработчик с ротацией"
+        assert rotating[0].maxBytes > 0
+        assert rotating[0].backupCount == LOG_BACKUP_COUNT
+    finally:
+        for handler in list(root_logger.handlers):
+            handler.close()
+        root_logger.handlers.clear()
+        for handler in original_handlers:
+            root_logger.addHandler(handler)
+
+
+def test_reset_returns_false_without_file_handlers():
+    """Без файлового обработчика обнуление ничего не ломает."""
+    root_logger = logging.getLogger("")
+    original_handlers = list(root_logger.handlers)
+    root_logger.handlers.clear()
+
+    try:
+        assert reset_log_file() is False
+    finally:
+        root_logger.handlers.clear()
+        for handler in original_handlers:
+            root_logger.addHandler(handler)
 
 
 def test_qtextedit_handler_emits_signal(qtbot):

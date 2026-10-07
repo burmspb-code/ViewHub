@@ -1,11 +1,18 @@
 import logging
 
+from contextlib import suppress
 from logging import Logger
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from src.core.paths import app_root, ensure_writable
+
+# Ограничение размера файлового лога. На сервере лог не должен расти
+# бесконечно: при долгой работе он способен занять весь диск.
+LOG_MAX_BYTES = 2 * 1024 * 1024  # 2 МБ на текущий файл
+LOG_BACKUP_COUNT = 3  # плюс три предыдущие версии
 
 # Отключаем DEBUG и INFO спам от сетевых библиотек и asyncio глобально
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -71,6 +78,43 @@ def _resolve_log_dir() -> Path:
     return ensure_writable(app_root() / "logs")
 
 
+def reset_log_file() -> bool:
+    """
+    Удаляет файловый лог вместе с ротациями.
+
+    Вызывается в начале каждой сессии парсинга, поэтому лог всегда
+    описывает только текущий запуск, а не историю предыдущих.
+
+    Файл удаляется целиком, а не обрезается: обработчик открыт с
+    delay=True и пересоздаст файл при первой же записи.
+
+    Возвращает True, если лог был удалён.
+    """
+    root_logger = logging.getLogger("")
+    removed = False
+
+    for handler in list(root_logger.handlers):
+        if not isinstance(handler, RotatingFileHandler):
+            continue
+
+        base_name = handler.baseFilename
+        handler.close()
+
+        candidates = [base_name]
+        candidates.extend(f"{base_name}.{index}" for index in range(1, LOG_BACKUP_COUNT + 1))
+
+        for candidate in candidates:
+            with suppress(OSError):
+                Path(candidate).unlink()
+                removed = True
+
+        # Обработчик остаётся подключённым: delay=True заставит его создать
+        # новый файл при следующей записи.
+        handler.stream = None
+
+    return removed
+
+
 def setup_logger(name: str = "", level: int = logging.INFO) -> Logger:
     """
     Инициализирует базовые параметры логгера.
@@ -85,8 +129,10 @@ def setup_logger(name: str = "", level: int = logging.INFO) -> Logger:
 
     # Файловый обработчик добавляем только для корневого логгера и только один раз.
     if name == "" and not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
-        file_handler = logging.FileHandler(
+        file_handler = RotatingFileHandler(
             str(_resolve_log_dir() / "viewhub.log"),
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
             encoding="utf-8",
             delay=True,
         )

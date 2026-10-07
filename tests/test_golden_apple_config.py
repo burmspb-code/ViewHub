@@ -30,23 +30,23 @@ def test_headless_is_default_mode():
     assert GoldenAppleConfig.DEFAULT_HEADLESS is True
 
 
-def test_env_var_names_are_scoped_to_this_site():
+def test_only_one_env_var_remains():
     """
-    Имена переменных окружения должны быть уникальными для этого парсера.
+    У парсера осталась одна переменная окружения — переключение режима отрисовки.
 
-    Префикс GOLDAPPLE_ не даёт этим настройкам повлиять на другие парсеры.
+    Экспериментальные переменные (User-Agent, отключение GPU, отключение
+    маскировки, канал chromium) и поддержка прокси удалены перед передачей
+    проекта заказчику: они нужны были только при разработке, а заказчик мог
+    случайно выставить одну из них и сломать парсер.
     """
     env_vars = [
-        GoldenAppleConfig.HEADLESS_ENV_VAR,
-        GoldenAppleConfig.UA_ENV_VAR,
-        GoldenAppleConfig.DISABLE_GPU_ENV_VAR,
-        GoldenAppleConfig.STEALTH_OFF_ENV_VAR,
-        GoldenAppleConfig.NO_CHANNEL_ENV_VAR,
-        GoldenAppleConfig.PROXY_ENV_VAR,
+        name
+        for name in dir(GoldenAppleConfig)
+        if name.endswith("ENV_VAR")
     ]
 
-    assert all(name.startswith("GOLDAPPLE_") for name in env_vars)
-    assert len(set(env_vars)) == len(env_vars), "имена переменных не должны повторяться"
+    assert env_vars == ["HEADLESS_ENV_VAR"]
+    assert GoldenAppleConfig.HEADLESS_ENV_VAR == "GOLDAPPLE_HEADLESS"
 
 
 def test_base_config_knows_nothing_about_browser():

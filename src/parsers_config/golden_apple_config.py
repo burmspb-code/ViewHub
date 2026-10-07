@@ -54,6 +54,9 @@ class GoldenAppleConfig(BaseDBParsingConfig):
     DEFAULT_HEADLESS: ClassVar[bool] = True
 
     # Имя переменной окружения для переключения режима отрисовки.
+    # Это единственная переменная окружения парсера: она нужна, чтобы
+    # заказчик мог переключить режим на конкретной машине, не пересобирая
+    # программу. Все остальные настройки задаются только константами.
     HEADLESS_ENV_VAR: ClassVar[str] = "GOLDAPPLE_HEADLESS"
 
     # User-Agent для режима без отрисовки.
@@ -70,13 +73,6 @@ class GoldenAppleConfig(BaseDBParsingConfig):
     # Требуется ли отключение GPU в режиме без отрисовки.
     # Без этого флага включается программный рендеринг, который сайт отвергает.
     HEADLESS_DISABLE_GPU: ClassVar[bool] = True
-
-    # Имена экспериментальных переменных окружения (для разбора отказов).
-    UA_ENV_VAR: ClassVar[str] = "GOLDAPPLE_UA"
-    DISABLE_GPU_ENV_VAR: ClassVar[str] = "GOLDAPPLE_DISABLE_GPU"
-    STEALTH_OFF_ENV_VAR: ClassVar[str] = "GOLDAPPLE_STEALTH_OFF"
-    NO_CHANNEL_ENV_VAR: ClassVar[str] = "GOLDAPPLE_NO_CHANNEL"
-    PROXY_ENV_VAR: ClassVar[str] = "GOLDAPPLE_PROXY"
 
     @classmethod
     def get_full_schema(cls) -> Dict[str, str]:

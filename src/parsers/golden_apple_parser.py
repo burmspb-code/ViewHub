@@ -9,13 +9,13 @@ import random
 import typing
 
 from contextlib import suppress
-from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from typing import Any, List, Dict, Generator, Optional
 from playwright.sync_api import sync_playwright
 
 from src.core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
+from src.core.logger import reset_log_file
 from src.core.paths import app_root, ensure_writable, resolve_playwright_browsers_path
 from src.database.sqlite_manager import DatabaseManager
 from src.my_exceptions.exceptions import ExceptionStopParser
@@ -73,6 +73,13 @@ class GoldenAppleParser(BaseParser):
     def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, manager: DatabaseManager):
         super().__init__(config, extractor, manager)
         self.description = PARSER_DESCRIPTION
+
+        # Лог обнуляется на старте сеанса парсинга, чтобы файл описывал
+        # только текущий запуск. Сделано здесь, а не в run_parsing(): так
+        # в лог попадает всё, что важно для диагностики, — режим отрисовки,
+        # путь к браузеру и ход парсинга.
+        reset_log_file()
+
         # Номер текущей страницы, всегда начинаем с первой страницы
         self.current_page = 1
         # Счетчик пустых страниц подряд для надежной остановки
@@ -253,19 +260,6 @@ class GoldenAppleParser(BaseParser):
         value = getattr(self.config, name, None)
         return value if isinstance(value, bool) else default
 
-    def _flag_env(self, name: str) -> bool:
-        """
-        Читает булеву переменную окружения: «1/true/yes/on» -> True.
-
-        Пустое, отсутствующее или нераспознанное значение даёт False.
-        ВАЖНО: здесь нет параметра invert. Раньше он был, и при использовании
-        вместе с `not` давал двойное отрицание — переменная работала наоборот,
-        из-за чего эксперимент проверял не ту конфигурацию. Если нужно
-        «отключить», переменная должна так и называться: GOLDAPPLE_STEALTH_OFF.
-        """
-        raw = os.environ.get(name, "").strip().lower()
-        return raw in {"1", "true", "yes", "on"}
-
     def _resolve_headless(self) -> bool:
         """
         Определяет режим отрисовки браузера.
@@ -289,50 +283,6 @@ class GoldenAppleParser(BaseParser):
             return False
 
         return self._cfg_bool("DEFAULT_HEADLESS", True)
-
-    def _resolve_proxy(self) -> Optional[Dict[str, str]]:
-        """
-        Собирает настройки прокси из конфига или переменных окружения.
-
-        Поддерживаются варианты:
-          GOLDAPPLE_PROXY=http://user:pass@host:port   (полный URL)
-          GOLDAPPLE_PROXY=host:port                   (схема подставится http://)
-        Поля proxy_username / proxy_password в конфиге дополняют вариант без логина.
-
-        Раньше поле прокси было в интерфейсе, но сюда не передавалось, поэтому
-        настройка не влияла на работу парсера.
-        """
-        raw = os.environ.get(self._cfg_str("PROXY_ENV_VAR", "GOLDAPPLE_PROXY"), "").strip()
-        if not raw:
-            raw = str(getattr(self.config, "proxy", "") or "").strip()
-        if not raw:
-            return None
-
-        if "://" not in raw:
-            raw = f"http://{raw}"
-
-        try:
-            parsed = urlparse(raw)
-        except ValueError as err:
-            logger.warning("Некорректный прокси %r: %s. Прокси не применяется.", raw, err)
-            return None
-
-        if not parsed.hostname or not parsed.port:
-            logger.warning(
-                "Не удалось разобрать прокси %r (нужен вид host:port или URL). Прокси не применяется.",
-                raw,
-            )
-            return None
-
-        settings: Dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-
-        username = parsed.username or str(getattr(self.config, "proxy_username", "") or "").strip()
-        password = parsed.password or str(getattr(self.config, "proxy_password", "") or "").strip()
-        if username:
-            settings["username"] = username
-            settings["password"] = password or ""
-
-        return settings
 
     def _wait_for_challenge_to_pass(self, page, timeout_ms: int = 45000) -> bool:
         """
@@ -666,12 +616,8 @@ class GoldenAppleParser(BaseParser):
             #
             # Причина такого поведения для бота неясна, вероятно он проверяет
             # согласованность сигналов с заявленной версией.
-            if headless_mode:
+            if self._cfg_bool("HEADLESS_DISABLE_GPU", True) and headless_mode:
                 launch_args.append("--disable-gpu")
-                logger.info("WebGL отключён (--disable-gpu) — режим headless.")
-            elif self._flag_env(self._cfg_str("DISABLE_GPU_ENV_VAR", "GOLDAPPLE_DISABLE_GPU")):
-                launch_args.append("--disable-gpu")
-                logger.info("WebGL отключён (--disable-gpu).")
 
             launch_kwargs = dict(
                 user_data_dir=self.user_data_dir,
@@ -688,22 +634,10 @@ class GoldenAppleParser(BaseParser):
             # Подмена User-Agent. В рабочей конфигурации был зашит Chrome/124.
             # Значение можно вернуть через переменную окружения, чтобы проверить
             # влияние версии на результат проверки.
-            custom_ua = os.environ.get(self._cfg_str("UA_ENV_VAR", "GOLDAPPLE_UA"), "").strip()
-
-            if custom_ua:
-                launch_kwargs["user_agent"] = custom_ua
-                logger.info("User-Agent переопределён: %s", custom_ua)
-            elif headless_mode:
+            if headless_mode:
                 # Подмена обязательна для headless — проверено экспериментом.
                 launch_kwargs["user_agent"] = self._cfg_str("HEADLESS_USER_AGENT", HEADLESS_USER_AGENT_FALLBACK)
                 logger.info("User-Agent подменён на Chrome/124 — требуется для headless.")
-
-            # Прокси из настроек GUI/конфига. Раньше поле прокси существовало в
-            # интерфейсе, но в парсер никогда не передавалось.
-            proxy_settings = self._resolve_proxy()
-            if proxy_settings:
-                launch_kwargs["proxy"] = proxy_settings
-                logger.info("Используется прокси: %s", proxy_settings.get("server"))
 
             # Флаги, нужные ТОЛЬКО на Linux. На Windows они бессмысленны,
             # а --no-sandbox там ещё и ослабляет безопасность, поэтому
@@ -725,21 +659,15 @@ class GoldenAppleParser(BaseParser):
                 )
                 to_gui("🖥 Обычный режим браузера с отрисовкой.")
 
-            use_channel = not self._flag_env(self._cfg_str("NO_CHANNEL_ENV_VAR", "GOLDAPPLE_NO_CHANNEL"))
-
-            if use_channel:
-                try:
-                    context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)
-                except Exception as channel_err:
-                    # Канал chromium иногда отсутствует при нестандартной сборке.
-                    logger.warning(
-                        "Не удалось запустить Chromium с каналом 'chromium' (%s). Пробуем обычный "
-                        "headless-запуск — в UA будет HeadlessChrome.",
-                        str(channel_err).splitlines()[0],
-                    )
-                    context = p.chromium.launch_persistent_context(**launch_kwargs)
-            else:
-                logger.info("Канал 'chromium' отключён (GOLDAPPLE_NO_CHANNEL).")
+            try:
+                context = p.chromium.launch_persistent_context(channel="chromium", **launch_kwargs)
+            except Exception as channel_err:
+                # Канал chromium иногда отсутствует при нестандартной сборке.
+                logger.warning(
+                    "Не удалось запустить Chromium с каналом 'chromium' (%s). Пробуем обычный "
+                    "headless-запуск — в UA будет HeadlessChrome.",
+                    str(channel_err).splitlines()[0],
+                )
                 context = p.chromium.launch_persistent_context(**launch_kwargs)
 
             # Очищаем куки и разрешения от предыдущего запуска
@@ -770,13 +698,10 @@ class GoldenAppleParser(BaseParser):
                 # маскировка не работала, и сайт всё равно пропускал. Возможно,
                 # подмены playwright_stealth (userAgentData, sec-ch-ua, WebGL)
                 # противоречат настоящей версии браузера и делают хуже.
-                if not self._flag_env(self._cfg_str("STEALTH_OFF_ENV_VAR", "GOLDAPPLE_STEALTH_OFF")):
-                    from playwright_stealth import Stealth
+                from playwright_stealth import Stealth
 
-                    Stealth().apply_stealth_sync(context)
-                    to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
-                else:
-                    logger.info("Stealth-маскировка отключена (GOLDAPPLE_STEALTH_OFF=1).")
+                Stealth().apply_stealth_sync(context)
+                to_gui("🎭 Успешно сформирован новый уникальный слепок устройства.")
             except Exception as stealth_err:
                 message = f"Не удалось включить stealth-маскировку: {stealth_err}"
                 logger.error(message)

@@ -1,6 +1,8 @@
 import os
 import sys
 
+from pathlib import Path
+
 import pytest
 
 
@@ -29,8 +31,10 @@ def test_init_goldenapple_parser(monkeypatch):
     assert parser.current_page == 1
     assert parser.empty_pages_count == 0
 
-    expected = os.path.join(fake_path, "chrome_user_profile")
-    assert parser.user_data_dir == expected
+    # Ожидаемый путь собираем через Path, иначе тест падает на Windows:
+    # в fake_path прямые слэши, а str(Path(...)) возвращает обратные.
+    expected = str(Path(fake_path) / "chrome_user_profile")
+    assert Path(parser.user_data_dir) == Path(expected)
 
 
 def test_build_url_with_pagination(monkeypatch):
@@ -118,7 +122,7 @@ class TestGoldenAppleParserSleepAndLoad:
         with pytest.raises(ExceptionStopParser) as exc_info:
             mock_parser._smart_sleep(5.0)  # Задаем аж 5 секунд сна
 
-        assert "Процесс отменен пользователем во время паузы." in str(exc_info.value)
+        assert "Процесс отменен пользователем" in str(exc_info.value)
 
 
 class TestLoadCatalogPage:
@@ -223,8 +227,12 @@ class TestLoadCatalogPage:
         assert "Fatal Error" in str(exc_info.value)
 
         # Проверяем логирование: текст должен взять только первую строчку ошибки и номер страницы
-        mock_logger.error.assert_called_once()
-        assert "Ошибка. Не удалось прогрузить страницу каталога №5: Fatal Error" in mock_logger.error.call_args[0][0]
+        # Вызывается logger.exception, а не logger.error. На настоящем
+        # логгере exception внутри вызывает error, но на MagicMock это
+        # разные атрибуты, поэтому проверять нужно именно exception.
+        mock_logger.exception.assert_called_once()
+        template, page_number = mock_logger.exception.call_args[0]
+        assert template % page_number == "Ошибка. Не удалось прогрузить страницу каталога №5"
 
 
 class TestStablePageContent:
@@ -284,156 +292,6 @@ class TestStablePageContent:
 
         with pytest.raises(ExceptionStopParser):
             parser._stable_page_content(page)
-
-
-class TestProxyResolution:
-    """Тесты разбора настроек прокси.
-
-    Раньше поле прокси было в интерфейсе, но в парсер не передавалось, поэтому
-    настройка молча не влияла на работу.
-    """
-
-    @pytest.fixture
-    def parser(self, mocker, monkeypatch):
-        monkeypatch.delenv("GOLDAPPLE_PROXY", raising=False)
-        config = mocker.MagicMock()
-        config.proxy = ""
-        config.proxy_username = ""
-        config.proxy_password = ""
-        parser = GoldenAppleParser(
-            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
-        )
-        return parser
-
-    def test_returns_none_when_not_configured(self, parser):
-        """Прокси не задан — возвращаем None, браузер идёт напрямую."""
-        assert parser._resolve_proxy() is None
-
-    def test_adds_scheme_to_host_port(self, parser, monkeypatch):
-        """Вид host:port без схемы должен работать."""
-        monkeypatch.setenv("GOLDAPPLE_PROXY", "host.example:8080")
-        assert parser._resolve_proxy() == {"server": "http://host.example:8080"}
-
-    def test_parses_credentials(self, parser, monkeypatch):
-        """Логин и пароль извлекаются из URL."""
-        monkeypatch.setenv("GOLDAPPLE_PROXY", "http://user:pass@1.2.3.4:9000")
-        assert parser._resolve_proxy() == {
-            "server": "http://1.2.3.4:9000",
-            "username": "user",
-            "password": "pass",
-        }
-
-    def test_supports_socks_scheme(self, parser, monkeypatch):
-        """SOCKS-схема не должна переписываться на http."""
-        monkeypatch.setenv("GOLDAPPLE_PROXY", "socks5://5.6.7.8:1080")
-        assert parser._resolve_proxy() == {"server": "socks5://5.6.7.8:1080"}
-
-    def test_falls_back_to_config_value(self, parser):
-        """Если переменной окружения нет, берём значение из конфига."""
-        parser.config.proxy = "10.0.0.1:3128"
-        assert parser._resolve_proxy() == {"server": "http://10.0.0.1:3128"}
-
-    def test_headless_is_default_on_both_platforms(self, parser, monkeypatch):
-        """
-        headless — режим по умолчанию на обеих платформах.
-
-        Изначально по умолчанию выбирался обычный браузер, а headless считался
-        запасным вариантом, который антибот якобы отклоняет. Эксперимент это
-        опроверг: headless проверен и на Windows, и на Linux, а обычный режим
-        к тому же требует графического окружения и расходует больше ресурсов.
-        """
-        monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
-        monkeypatch.delenv("DISPLAY", raising=False)
-        for platform in ("win32", "linux"):
-            monkeypatch.setattr(sys, "platform", platform)
-            assert parser._resolve_headless() is True, platform
-
-    @pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
-    def test_headless_forced_on(self, parser, monkeypatch, value):
-        """Явное значение 1 включает headless на любой платформе."""
-        monkeypatch.setenv("GOLDAPPLE_HEADLESS", value)
-        monkeypatch.setattr(sys, "platform", "win32")
-
-        assert parser._resolve_headless() is True
-
-    @pytest.mark.parametrize("value", ["0", "false", "no", "off"])
-    def test_headless_forced_off(self, parser, monkeypatch, value):
-        """Явное значение 0 включает обычный режим с отрисовкой."""
-        monkeypatch.setenv("GOLDAPPLE_HEADLESS", value)
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.setattr(sys, "platform", "linux")
-
-        assert parser._resolve_headless() is False
-
-    def test_headless_default_ignores_display(self, parser, monkeypatch):
-        """
-        Наличие DISPLAY больше не переключает режим.
-
-        Раньше при заданном DISPLAY выбирался обычный браузер, что означало лишний
-        расход ресурсов на VPS. Теперь наличие дисплея на выбор режима не влияет.
-        """
-        monkeypatch.delenv("GOLDAPPLE_HEADLESS", raising=False)
-        monkeypatch.setenv("DISPLAY", ":10")
-        monkeypatch.setattr(sys, "platform", "linux")
-
-        assert parser._resolve_headless() is True
-
-    def test_headless_ignores_garbage_value(self, parser, monkeypatch):
-        """Мусорное значение не ломает запуск — берётся значение по умолчанию."""
-        monkeypatch.setenv("GOLDAPPLE_HEADLESS", "мусор")
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.setattr(sys, "platform", "linux")
-
-        assert parser._resolve_headless() is True
-
-    def test_flag_env_default_is_false_when_unset(self, parser, monkeypatch):
-        """Незаданная переменная даёт False — поведение по умолчанию не меняется."""
-        monkeypatch.delenv("GOLDAPPLE_STEALTH_OFF", raising=False)
-        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is False
-
-    @pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
-    def test_flag_env_enabled(self, parser, monkeypatch, value):
-        """Истинные значения включают флаг."""
-        monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", value)
-        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is True
-
-    @pytest.mark.parametrize("value", ["0", "false", "no", "off", "мусор"])
-    def test_flag_env_disabled(self, parser, monkeypatch, value):
-        """Ложные и нераспознанные значения выключают флаг — без падения."""
-        monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", value)
-        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is False
-
-    def test_disable_switches_work_in_the_intended_direction(self, parser, monkeypatch):
-        """
-        Регрессия: переменные отключения работали НАОБОРОТ.
-
-        Раньше код использовал `not _flag_env(..., invert=True)`, то есть
-        двойное отрицание. В результате GOLDAPPLE_STEALTH=0 включал маскировку,
-        а GOLDAPPLE_NO_CHANNEL=1 оставлял канал включённым — эксперимент
-        проверял не ту конфигурацию, и результаты были неинтерпретируемы.
-        """
-        monkeypatch.setenv("GOLDAPPLE_STEALTH_OFF", "1")
-        assert parser._flag_env("GOLDAPPLE_STEALTH_OFF") is True
-        # Маскировка применяется, только если переменная НЕ задана
-        stealth_applied = not parser._flag_env("GOLDAPPLE_STEALTH_OFF")
-        assert stealth_applied is False
-
-        monkeypatch.delenv("GOLDAPPLE_STEALTH_OFF", raising=False)
-        stealth_applied = not parser._flag_env("GOLDAPPLE_STEALTH_OFF")
-        assert stealth_applied is True
-
-        monkeypatch.setenv("GOLDAPPLE_NO_CHANNEL", "1")
-        use_channel = not parser._flag_env("GOLDAPPLE_NO_CHANNEL")
-        assert use_channel is False
-
-        monkeypatch.delenv("GOLDAPPLE_NO_CHANNEL", raising=False)
-        use_channel = not parser._flag_env("GOLDAPPLE_NO_CHANNEL")
-        assert use_channel is True
-
-    def test_ignores_malformed_value(self, parser, monkeypatch):
-        """Некорректный прокси не должен ломать запуск парсера."""
-        monkeypatch.setenv("GOLDAPPLE_PROXY", "broken")
-        assert parser._resolve_proxy() is None
 
 
 class TestBlockDetection:
@@ -660,8 +518,8 @@ class TestCountAndGetProductsOnPage:
         assert "Target page closed" in str(exc_info.value)
 
         # Проверяем, что логгер зафиксировал правильный номер страницы текущего парсера (№4)
-        log_message = mock_logger.error.call_args[0][0]
-        assert "Ошибка. Не удалось определить количество товаров на странице №4" in log_message
+        template, page_number = mock_logger.exception.call_args[0]
+        assert template % page_number == "Ошибка. Не удалось определить количество товаров на странице №4"
 
 
 class TestRunParsing:

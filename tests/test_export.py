@@ -884,6 +884,7 @@ def test_parsing_on_click_missing_target_url():
     with (
         patch("src.parsers_config.golden_apple_config.GoldenAppleConfig"),
         patch("PyQt6.QtCore.QThread") as mock_thread_class,
+        pytest.raises(ValueError, match="не должны быть пустыми"),
     ):
         parsing_on_click(mock_obj)
 
@@ -902,6 +903,7 @@ def test_parsing_on_click_missing_keyword():
     with (
         patch("src.parsers_config.golden_apple_config.GoldenAppleConfig"),
         patch("PyQt6.QtCore.QThread") as mock_thread_class,
+        pytest.raises(ValueError, match="не должны быть пустыми"),
     ):
         parsing_on_click(mock_obj)
 
@@ -916,9 +918,11 @@ def test_parsing_on_click_db_initialization_error():
     mock_obj.target_url_input.text.return_value = "https://goldapple.ru"
     mock_obj.key_word_input.text.return_value = "крем"
 
-    # Имитируем падение метода init_for_config в DatabaseManager
+    # parsing_on_click берёт менеджер из объекта окна (obj.manager),
+    # а не создаёт новый. Поэтому подменять надо именно его.
     mock_manager = MagicMock()
     mock_manager.init_for_config.side_effect = Exception("Disk I/O Error")
+    mock_obj.manager = mock_manager
 
     with (
         patch("src.service_modules.parsing_service.GoldenAppleConfig"),
@@ -947,13 +951,16 @@ def test_parsing_on_click_success_thread_start():
     # Создаем изолированные моки для треда и воркера
     mock_thread = MagicMock(spec=QThread)
     mock_worker = MagicMock()
-    mock_parser = MagicMock()
+    # parsing_on_click берёт парсер из obj.parser, а не создаёт новый,
+    # поэтому проверять нужно именно этот объект.
+    mock_parser = mock_obj.parser
+    # Запоминаем объект заранее: он передаётся парсеру как progress_callback
+    progress_emit = mock_worker.progress_signal.emit
 
     with (
         patch("src.service_modules.parsing_service.GoldenAppleConfig"),
         patch("src.service_modules.parsing_service.GoldenAppleExtractor"),
         patch("src.service_modules.parsing_service.DatabaseManager"),
-        patch("src.service_modules.parsing_service.GoldenAppleParser", return_value=mock_parser),
         patch("src.service_modules.parsing_service.QThread", return_value=mock_thread),
         patch("src.service_modules.parsing_service.ParserWorker", return_value=mock_worker),
     ):
@@ -970,12 +977,16 @@ def test_parsing_on_click_success_thread_start():
         # 3. Кнопка отмены парсинга включается при запуске
         mock_obj.btn_cancel_parsing.setEnabled.assert_called_once_with(True)
 
-        # 4. Объект парсера успешно прописался в контекст главного окна
-        assert mock_obj.parser == mock_parser
+        # 4. Введённые значения попали в конфигурацию парсера
+        assert mock_parser.config.target_url == "https://goldapple.ru"
+        assert mock_parser.config.keyword == "помада"
 
         # 5. Проверяем перенос воркера в фоновый тред и установку callback прогресса
         mock_worker.moveToThread.assert_called_once_with(mock_thread)
-        assert mock_parser.progress_callback == mock_worker.progress_signal.emit
+        # Обращаться к progress_signal.emit нужно к тому же объекту, который
+        # был передан парсеру: каждый новый доступ к атрибуту MagicMock
+        # создаёт свежий объект, и сравнение всегда даёт False.
+        assert mock_parser.progress_callback is progress_emit
 
         # 6. Проверяем связывание QT-сигналов и логику автоматической очистки памяти
         mock_thread.started.connect.assert_called_once_with(mock_worker.run)
