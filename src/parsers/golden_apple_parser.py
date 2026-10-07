@@ -16,9 +16,14 @@ from typing import Any, List, Dict, Generator, Optional
 from playwright.sync_api import sync_playwright
 
 from src.core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
-from src.core.paths import app_root, ensure_writable
+from src.core.paths import app_root, ensure_writable, resolve_playwright_browsers_path
 from src.database.sqlite_manager import DatabaseManager
 from src.my_exceptions.exceptions import ExceptionStopParser
+
+# Запасное имя папки с упакованным браузером. Основное значение объявлено в
+# конфигурации парсера — GoldenAppleConfig.BROWSERS_DIR_NAME. Этот вариант
+# нужен только на случай подмены конфигурации заглушкой в тестах.
+BROWSERS_DIR_NAME_FALLBACK = "pw-browsers"
 
 
 logger = logging.getLogger(__name__)
@@ -208,6 +213,30 @@ class GoldenAppleParser(BaseParser):
             )
 
         return None
+
+    def _apply_browsers_path(self) -> None:
+        """
+        Определяет каталог с Chromium и выставляет PLAYWRIGHT_BROWSERS_PATH.
+
+        Вызывается в момент запуска парсинга, а не при инициализации пакета:
+        браузер нужен не всем парсерам проекта. Имя папки с упакованным
+        браузером берётся из конфигурации этого парсера, поэтому Citadel
+        и Gardarika на него не влияют.
+        """
+        browsers_dir = self._cfg_str("BROWSERS_DIR_NAME", BROWSERS_DIR_NAME_FALLBACK)
+        resolved = resolve_playwright_browsers_path(browsers_dir)
+
+        if resolved is None:
+            logger.warning(
+                "Каталог браузеров Playwright не найден (проверялась папка %r). "
+                "Установите Chromium на сервер: python -m playwright install chromium. "
+                "Парсер попытается продолжить со штатным путём Playwright.",
+                browsers_dir,
+            )
+            return
+
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(resolved)
+        logger.info("Каталог браузеров Playwright: %s", resolved)
 
     def _cfg_str(self, name: str, default: str) -> str:
         """
@@ -555,6 +584,11 @@ class GoldenAppleParser(BaseParser):
                 typing.cast(typing.Callable[[str], None], callback)(msg)
 
         to_gui("=== ЗАПУСК СКРЫТОГО КОНВЕЙЕРА ПАРСИНГА ===")
+
+        # Путь к браузеру разрешается ЗДЕСЬ, а не при старте приложения.
+        # Браузер нужен только этому парсеру: парсеры, работающие через API,
+        # ничего подобного не делают и не должны зависеть от наличия Chromium.
+        self._apply_browsers_path()
 
         with sync_playwright() as p:
             # 1. ЗАПУСК БРАУЗЕРА

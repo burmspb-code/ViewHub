@@ -1,13 +1,5 @@
 """
-Единый источник правды для вычисления путей приложения.
-
-Раньше логика «где мы находимся» дублировалась в четырёх местах
-(`src/__init__.py`, `src/core/resources.py`, `src/database/db_config.py`,
-`src/parsers/golden_apple_parser.py`) и в собранном приложении ломалась:
-на Linux путь к браузерам Playwright был захардкожен под `/root/.cache`.
-
-Здесь собрано одно место, которое корректно работает и при запуске из
-исходников, и в скомпилированном бинарнике (PyInstaller `onedir`/`onefile`).
+Вычисление путей приложения в зависимости от способа запуска и операционной системы.
 """
 
 import os
@@ -16,11 +8,6 @@ import tempfile
 
 from pathlib import Path
 from typing import Optional
-
-#: Имя папки с браузерами Playwright, если они упакованы в сборку.
-#: Должно совпадать с BROWSERS_DEST в viewhub.spec.
-BROWSERS_DIR_NAME = "pw-browsers"
-
 
 def is_frozen() -> bool:
     """True, если код запущен из скомпилированного бинарника."""
@@ -80,13 +67,37 @@ def _platform_default_browsers_dir() -> Path:
     """
     Штатный каталог кэша браузеров Playwright для текущей ОС.
 
+    Логика повторяет реализацию Playwright (computeDefaultCacheDirectory в
+    coreBundle.js), иначе приложение искало бы браузер не там, где его
+    действительно установили:
+
+        linux  -> $XDG_CACHE_HOME, иначе ~/.cache
+        darwin -> ~/Library/Caches
+        win32  -> %LOCALAPPDATA%, иначе ~/AppData/Local
+
+    Во всех случаях добавляется подкаталог `ms-playwright`.
+
     ВАЖНО: используется Path.home(), а не жёстко зашитый '/root/.cache'.
     Прежняя константа ломала запуск от любого пользователя, кроме root.
+
+    Отличие от Playwright: на неподдерживаемой платформе он бросает
+    исключение, а мы используем ~/.cache. Это осознанно — падать при
+    запуске на BSD или экзотической системе не нужно.
     """
     if sys.platform.startswith("win"):
         local_appdata = os.environ.get("LOCALAPPDATA")
         if local_appdata:
             return Path(local_appdata) / "ms-playwright"
+        return Path.home() / "AppData" / "Local" / "ms-playwright"
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+
+    # Linux и прочие Unix-подобные системы, включая контейнеры.
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        return Path(xdg_cache_home) / "ms-playwright"
+
     return Path.home() / ".cache" / "ms-playwright"
 
 
@@ -104,15 +115,19 @@ def _is_usable_browsers_dir(path: Path) -> bool:
         return False
 
 
-def resolve_playwright_browsers_path() -> Optional[Path]:
+def resolve_playwright_browsers_path(bundled_dir_name: str) -> Optional[Path]:
     """
     Определяет каталог с браузерами Chromium для Playwright.
 
+    Вызывается ТОЛЬКО парсерами, которым браузер действительно нужен.
+    Имя папки с упакованным браузером передаётся параметром, потому что
+    каждый парсер объявляет его у себя: браузер требуется не всем. Парсер,
+    работающий через API, сюда не обращается вовсе.
+
     Порядок приоритета:
-      1. `PLAYWRIGHT_BROWSERS_PATH` из окружения или `.env` — явная настройка
-         пользователя всегда побеждает.
-      2. Папка `pw-browsers`, упакованная внутрь сборки (когда в spec
-         выставлен BUNDLE_BROWSERS = True).
+      1. `PLAYWRIGHT_BROWSERS_PATH` из окружения — явная настройка всегда побеждает.
+      2. Папка с упакованным браузером внутри сборки (когда в spec выставлен
+         BUNDLE_BROWSERS = True).
       3. Штатный кэш текущей ОС (`~/.cache/ms-playwright` на Linux,
          `%LOCALAPPDATA%/ms-playwright` на Windows).
 
@@ -130,7 +145,7 @@ def resolve_playwright_browsers_path() -> Optional[Path]:
         if _is_usable_browsers_dir(candidate):
             return candidate
 
-    bundled = bundle_root() / BROWSERS_DIR_NAME
+    bundled = bundle_root() / bundled_dir_name
     if _is_usable_browsers_dir(bundled):
         return bundled
 

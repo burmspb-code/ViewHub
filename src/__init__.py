@@ -3,36 +3,30 @@
 
 Выполняется автоматически при первом импорте `src` (в том числе из
 `main.py`), до создания QApplication. Здесь настраивается логирование
-и определяется путь к браузерам Playwright.
+и читается файл `.env`.
 """
 
-import os
 import logging
 
 from dotenv import load_dotenv
 
 from src.core.logger import setup_logger
-from src.core.paths import resolve_playwright_browsers_path
 
 logger = logging.getLogger(__name__)
 
-# .env читается первым, чтобы пользователь мог задать пути переопределением.
+# .env читается первым, чтобы пользователь мог задать общие настройки
+# (например, путь к базе данных) переопределением.
 load_dotenv()
 
 setup_logger(name="", level=logging.INFO)
 
-# Путь к Chromium для Playwright.
-# Раньше здесь стоял жёстко зашитый '/root/.cache/ms-playwright' для Linux,
-# из-за чего упакованный в бинарник браузер игнорировался, а запуск
-# от непривилегированного пользователя падал. Теперь путь вычисляется
-# в src.core.paths с проверкой существования каталога.
-_browsers_path = resolve_playwright_browsers_path()
-
-if _browsers_path is not None:
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_browsers_path)
-    logger.info("Каталог браузеров Playwright: %s", _browsers_path)
-else:
-    logger.warning(
-        "Каталог браузеров Playwright не найден. Установите Chromium на сервере "
-        "(python -m playwright install chromium) или задайте PLAYWRIGHT_BROWSERS_PATH в .env"
-    )
+# НАМЕРЕННО ЗДЕСЬ НЕТ РАЗРЕШЕНИЯ ПУТИ К БРАУЗЕРАМ.
+#
+# Раньше путь к Chromium вычислялся глобально при каждом старте приложения.
+# Это было неверно: браузер нужен не всем парсерам — например, парсеры,
+# работающие через API, обходятся без него совсем. Из-за глобального вызова
+# приложение тратило время впустую и, не найдя Chromium, писало предупреждение
+# «установите Chromium», хотя он не требовался.
+#
+# Теперь путь разрешает сам парсер в момент запуска браузера — см.
+# GoldenAppleParser.run_parsing() и paths.resolve_playwright_browsers_path().

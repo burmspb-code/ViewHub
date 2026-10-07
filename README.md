@@ -160,7 +160,7 @@ db_items_pages = manager.check_existing_items_with_pages(item_id_list)
 
 * **`main.py`** — Главная точка запуска приложения и инициализации глобального логгера.
 * **`src/windows_pq.py`** — Сборка графического интерфейса `MainWindow`, управление слоями, сигналами и слотами Qt.
-* **`src/core/paths.py`** — Единый источник правды для вычисления путей в обоих режимах (запуск из исходников и из скомпилированного бинарника). Различает каталог ресурсов (`bundle_root()`, read-only) и каталог для записи (`app_root()`), определяет путь к браузерам Playwright и гарантирует наличие каталога, доступного для записи. Содержит платформенные ветки для Windows и Linux.
+* **`src/core/paths.py`** — Единый источник правды для вычисления путей в обоих режимах (запуск из исходников и из скомпилированного бинарника). Различает каталог ресурсов (`bundle_root()`, read-only) и каталог для записи (`app_root()`), предоставляет разрешение пути к браузерам Playwright (вызывается только парсерами, которым браузер нужен) и гарантирует наличие каталога, доступного для записи. Содержит платформенные ветки для Windows и Linux.
 * **`src/service_modules/`** — Изолированный модульный сервисный слой обработки событий интерфейса, кнопок и сигналов фоновых потоков. Разделен на специализированные модули:
   * **`auth_service.py`** (`auth_on_click` / `request_on_click`) — Интеграция с внешним Django API, обработка сессий и токенов авторизации.
   * **`parsing_service.py`** (`parsing_on_click` / `parsing_cancel_on_click`) — Управление жизненным циклом фонового потока парсера Playwright (конфигурация прокси-сессии Chromium).
@@ -290,7 +290,7 @@ poetry run python main.py
 | `BUNDLE_BROWSERS` | `False` | Упаковывать ли Chromium внутрь сборки. `False` — берётся из кэша Playwright на сервере, сборка ~120 МБ. `True` — автономный бинарник ~550 МБ |
 | `CONSOLE_MODE` | `True` | Вывод диагностики в терминал. **Критично для отладки на сервере** |
 | `USE_UPX` | `False` | UPX-сжатие. Для сборки с Chromium и Node даёт малый выигрыш, но замедляет сборку и может повредить крупные бинарники |
-| `BROWSERS_DEST` | `"pw-browsers"` | Куда упаковывается Chromium при `BUNDLE_BROWSERS = True`. Значение должно совпадать с `src.core.paths.BROWSERS_DIR_NAME` |
+| `BROWSERS_DEST` | `"pw-browsers"` | Куда упаковывается Chromium при `BUNDLE_BROWSERS = True`. Значение должно совпадать с `GoldenAppleConfig.BROWSERS_DIR_NAME` |
 
 ### Инструкция по сборке для Linux
 
@@ -386,36 +386,50 @@ QT_QPA_PLATFORM=offscreen ./dist/viewhub/viewhub
 |---|---|
 | `DB_PATH_PARSING` | Путь к файлу базы данных SQLite |
 
-#### Переменные парсера «Золотое Яблоко»
+Это **всё**, что задаётся в `.env`. Настройки отдельных парсеров намеренно вынесены из `.env` в константы классов конфигурации.
 
-> ⚠️ **Все переменные этого раздела относятся ТОЛЬКО к парсеру `GoldenAppleParser`** (Золотое Яблоко). Они не влияют на парсеры Citadel и Gardarika — у каждого свои настройки, объявленные в его собственном классе конфигурации (`CitadelConfig`, `GardarikaConfig`).
+#### Настройки парсеров — константы, а не переменные .env
 
-| Переменная | Назначение |
-|---|---|
-| `GOLDAPPLE_PROXY` | Прокси для парсинга. Форматы: `host:port`, `http://user:pass@host:port`, `socks5://host:port` |
-| `GOLDAPPLE_HEADLESS` | Режим отрисовки браузера (см. ниже) |
-| `GOLDAPPLE_UA` | Переопределение User-Agent (экспериментальная) |
-| `GOLDAPPLE_DISABLE_GPU` | Принудительный `--disable-gpu` (экспериментальная) |
-| `GOLDAPPLE_STEALTH_OFF` | Отключить stealth-маскировку (экспериментальная) |
-| `GOLDAPPLE_NO_CHANNEL` | Не использовать канал `chromium` (экспериментальная) |
-| `PLAYWRIGHT_BROWSERS_PATH` | Каталог с Chromium. Задаётся в `.env`, см. `src/core/paths.py` |
+У каждого парсера собственные настройки, и они объявлены **константами в классе конфигурации**, а не в `.env`:
 
-```bash
-export GOLDAPPLE_PROXY=http://user:pass@residential-proxy:8080
+```python
+# src/parsers_config/golden_apple_config.py
+class GoldenAppleConfig(BaseDBParsingConfig):
+    BROWSERS_DIR_NAME = "pw-browsers"      # папка с браузером внутри сборки
+    DEFAULT_HEADLESS = True                # режим без отрисовки страниц
+    HEADLESS_ENV_VAR = "GOLDAPPLE_HEADLESS"
+    HEADLESS_USER_AGENT = "Mozilla/5.0 ... Chrome/124.0.0.0 ..."
+    HEADLESS_DISABLE_GPU = True
+    UA_ENV_VAR = "GOLDAPPLE_UA"
+    PROXY_ENV_VAR = "GOLDAPPLE_PROXY"
 ```
 
-#### Где объявлены настройки
+Причины такого решения:
 
-Настройки браузера **вынесены в класс конфигурации парсера** `src/parsers_config/golden_apple_config.py`:
+* У проекта несколько парсеров, и настройки одного сайта не должны влиять на остальные.
+* **Браузер нужен не всем.** Парсеры, работающие через API, обходятся без Chromium. Поэтому `BROWSERS_DIR_NAME` объявлен у парсера, а не в модуле путей.
+* Переменная всё ещё поддерживается для разовых переопределений **из терминала** — `.env` для этого не нужен:
 
-| Константа | Значение по умолчанию |
-|---|---|
-| `DEFAULT_HEADLESS` | `True` |
-| `HEADLESS_ENV_VAR` | `"GOLDAPPLE_HEADLESS"` |
-| `HEADLESS_USER_AGENT` | User-Agent с `Chrome/124` |
-| `HEADLESS_DISABLE_GPU` | `True` |
+```bash
+# Linux
+export GOLDAPPLE_HEADLESS=0        # обычное окно браузера вместо headless
+# Windows
+$env:GOLDAPPLE_HEADLESS="0"
+```
 
-Парсер читает их через `self.config`, поэтому базовые классы и конфигурации других парсеров ничего об этом не знают. В самом парсере остались только запасные значения для тестов на случай подмены конфигурации заглушкой.
+Такой способ имеет приоритет над константой и не требует правки файлов.
+
+| Переменная (только терминал) | Парсер | Назначение |
+|---|---|---|
+| `GOLDAPPLE_HEADLESS` | Золотое Яблоко | Режим отрисовки браузера |
+| `GOLDAPPLE_PROXY` | Золотое Яблоко | Прокси: `host:port`, `http://user:pass@host:port`, `socks5://host:port` |
+| `GOLDAPPLE_UA` | Золотое Яблоко | Переопределение User-Agent (экспериментальная) |
+| `GOLDAPPLE_DISABLE_GPU` | Золотое Яблоко | Принудительный `--disable-gpu` (экспериментальная) |
+| `GOLDAPPLE_STEALTH_OFF` | Золотое Яблоко | Отключить маскировку автоматизации (экспериментальная) |
+| `GOLDAPPLE_NO_CHANNEL` | Золотое Яблоко | Не использовать канал `chromium` (экспериментальная) |
+| `PLAYWRIGHT_BROWSERS_PATH` | любой браузерный | Каталог с Chromium вручную, см. `src/core/paths.py` |
+
+> ⚠️ Переменные с префиксом `GOLDAPPLE_` относятся **только** к парсеру Золотого Яблока и не влияют на CitadelParser и GardarikaParser.
 
 ### 🖥 Режим отрисовки браузера (парсер Золотого Яблока)
 

@@ -42,6 +42,13 @@ class GoldenAppleConfig(BaseDBParsingConfig):
     # как общие настройки приложения.
     # =====================================================================
 
+    # Имя папки с упакованным браузером внутри сборки.
+    #
+    # Объявлено здесь, а не в src/core/paths.py: браузер нужен не всем
+    # парсерам — например, работающим через API он не требуется вовсе.
+    # Должно совпадать с BROWSERS_DEST в viewhub.spec.
+    BROWSERS_DIR_NAME: ClassVar[str] = "pw-browsers"
+
     # Режим отрисовки по умолчанию. True — браузер без отрисовки страниц.
     # Требует подмены HEADLESS_USER_AGENT и добавления --disable-gpu.
     DEFAULT_HEADLESS: ClassVar[bool] = True
