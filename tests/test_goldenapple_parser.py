@@ -241,17 +241,13 @@ class TestStablePageContent:
     @pytest.fixture
     def parser(self, mocker):
         config = mocker.MagicMock()
-        parser = GoldenAppleParser(
-            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
-        )
+        parser = GoldenAppleParser(config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock())
         parser._is_running = True
         # Убираем паузу между попытками, чтобы тест был быстрым
         mocker.patch.object(parser, "_smart_sleep", return_value=None)
         return parser
 
-    RACE_ERROR = (
-        "Unable to retrieve content because the page is navigating and changing the content."
-    )
+    RACE_ERROR = "Unable to retrieve content because the page is navigating and changing the content."
 
     def test_retries_and_succeeds_on_navigation_race(self, parser, mocker):
         """Гонка с навигацией — не повод падать: повтор должен вернуть HTML."""
@@ -294,15 +290,46 @@ class TestStablePageContent:
             parser._stable_page_content(page)
 
 
+class TestHeadlessMode:
+    """Тесты режима отрисовки. Настройка задаётся только константой."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        from src.parsers_config.golden_apple_config import GoldenAppleConfig
+
+        return GoldenAppleParser(
+            config=GoldenAppleConfig, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
+        )
+
+    def test_headless_is_the_default(self, parser):
+        """По умолчанию парсер работает без отрисовки страниц."""
+        assert parser._resolve_headless() is True
+
+    def test_ignores_legacy_env_var(self, parser, monkeypatch):
+        """
+        Переменная окружения больше не влияет на режим.
+
+        Раньше ею переключали режим без пересборки — нужно было при отладке.
+        Теперь настройка живёт в константе конфигурации.
+        """
+        monkeypatch.setenv("GOLDAPPLE_HEADLESS", "0")
+        assert parser._resolve_headless() is True
+
+    def test_config_constant_is_used(self, parser, mocker):
+        """Значение берётся из конфигурации парсера, а не из кода напрямую."""
+        from src.parsers_config.golden_apple_config import GoldenAppleConfig
+
+        mocker.patch.object(GoldenAppleConfig, "DEFAULT_HEADLESS", False)
+        assert parser._resolve_headless() is False
+
+
 class TestBlockDetection:
     """Тесты определения блокировки и устойчивости к навигации при скролле."""
 
     @pytest.fixture
     def parser(self, mocker):
         config = mocker.MagicMock()
-        parser = GoldenAppleParser(
-            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
-        )
+        parser = GoldenAppleParser(config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock())
         parser._is_running = True
         parser.current_page = 1
         mocker.patch.object(parser, "_smart_sleep", return_value=None)
@@ -381,9 +408,7 @@ class TestChallengeWait:
     @pytest.fixture
     def parser(self, mocker):
         config = mocker.MagicMock()
-        parser = GoldenAppleParser(
-            config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
-        )
+        parser = GoldenAppleParser(config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock())
         parser._is_running = True
         return parser
 

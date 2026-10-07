@@ -30,31 +30,36 @@ def test_headless_is_default_mode():
     assert GoldenAppleConfig.DEFAULT_HEADLESS is True
 
 
-def test_only_one_env_var_remains():
+def test_no_env_var_switches_left():
     """
-    У парсера осталась одна переменная окружения — переключение режима отрисовки.
+    У парсера не осталось ни одной переменной окружения.
 
-    Экспериментальные переменные (User-Agent, отключение GPU, отключение
-    маскировки, канал chromium) и поддержка прокси удалены перед передачей
-    проекта заказчику: они нужны были только при разработке, а заказчик мог
-    случайно выставить одну из них и сломать парсер.
+    Переопределение через окружение требовалось только при разработке,
+    чтобы перебирать настройки без пересборки. Заказчик работает через
+    графический интерфейс, поэтому всё задаётся константами.
     """
-    env_vars = [
-        name
-        for name in dir(GoldenAppleConfig)
-        if name.endswith("ENV_VAR")
-    ]
+    env_vars = [name for name in dir(GoldenAppleConfig) if name.endswith("ENV_VAR")]
 
-    assert env_vars == ["HEADLESS_ENV_VAR"]
-    assert GoldenAppleConfig.HEADLESS_ENV_VAR == "GOLDAPPLE_HEADLESS"
+    assert env_vars == [], f"переменные окружения должны быть убраны, остались: {env_vars}"
+
+
+def test_headless_is_not_configurable_from_outside():
+    """Режим отрисовки задаётся только константой, не внешней настройкой."""
+    import os
+
+    os.environ["GOLDAPPLE_HEADLESS"] = "0"  # даже если переменная где-то осталась
+
+    assert GoldenAppleConfig.DEFAULT_HEADLESS is True
 
 
 def test_base_config_knows_nothing_about_browser():
     """Базовый класс не должен знать о настройках браузера."""
     from src.core.base_classes import BaseDBParsingConfig
 
-    leaked = [name for name in dir(BaseDBParsingConfig) if any(
-        marker in name for marker in ("HEADLESS", "USER_AGENT", "GPU", "STEALTH")
-    )]
+    leaked = [
+        name
+        for name in dir(BaseDBParsingConfig)
+        if any(marker in name for marker in ("HEADLESS", "USER_AGENT", "GPU", "STEALTH"))
+    ]
 
     assert leaked == []

@@ -93,7 +93,7 @@ def reset_log_file() -> bool:
     root_logger = logging.getLogger("")
     removed = False
 
-    for handler in list(root_logger.handlers):
+    for handler in root_logger.handlers:
         if not isinstance(handler, RotatingFileHandler):
             continue
 
@@ -136,9 +136,7 @@ def setup_logger(name: str = "", level: int = logging.INFO) -> Logger:
             encoding="utf-8",
             delay=True,
         )
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
+        file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         logger.addHandler(file_handler)
 
     return logger
@@ -156,7 +154,7 @@ def register_gui_handler(log_display_widget, level: int = logging.INFO):
     root_logger.setLevel(level)
 
     # Убираем только старые GUI-обработчики, файловый логгер сохраняем.
-    for handler in list(root_logger.handlers):
+    for handler in root_logger.handlers:
         if isinstance(handler, QTextEditHandler):
             root_logger.removeHandler(handler)
 

@@ -29,6 +29,7 @@ BROWSERS_DIR_NAME_FALLBACK = "pw-browsers"
 logger = logging.getLogger(__name__)
 
 PROCESS_CANCELLED_MSG = "Процесс отменен пользователем."
+UNKNOWN_ERROR_MSG = "Unknown error"
 
 # Playwright выбрасывает эту ошибку, когда во время вычисления
 # document.documentElement.outerHTML страница начинает новую навигацию и
@@ -53,9 +54,7 @@ CONTENT_RETRY_PAUSE = 1.5
 # не имеет. Запасной вариант нужен лишь на случай подмены конфигурации
 # заглушкой в тестах.
 HEADLESS_USER_AGENT_FALLBACK = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    " AppleWebKit/537.36 (KHTML, like Gecko)"
-    " Chrome/124.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
 PARSER_DESCRIPTION = (
@@ -74,10 +73,7 @@ class GoldenAppleParser(BaseParser):
         super().__init__(config, extractor, manager)
         self.description = PARSER_DESCRIPTION
 
-        # Лог обнуляется на старте сеанса парсинга, чтобы файл описывал
-        # только текущий запуск. Сделано здесь, а не в run_parsing(): так
-        # в лог попадает всё, что важно для диагностики, — режим отрисовки,
-        # путь к браузеру и ход парсинга.
+        # Лог обнуляется на старте сеанса парсинга
         reset_log_file()
 
         # Номер текущей страницы, всегда начинаем с первой страницы
@@ -96,10 +92,8 @@ class GoldenAppleParser(BaseParser):
         # невозможно — в логе просто не было строк. Теперь режим виден сразу
         # при создании парсера, то есть сразу после открытия раздела «ПАРСИНГ».
         logger.info(
-            "Режим отрисовки (при создании парсера): %s, %s=%s",
+            "Режим отрисовки (при создании парсера): %s",
             "headless" if self._resolve_headless() else "обычный браузер",
-            self._cfg_str("HEADLESS_ENV_VAR", "GOLDAPPLE_HEADLESS"),
-            os.environ.get(self._cfg_str("HEADLESS_ENV_VAR", "GOLDAPPLE_HEADLESS"), "не задана"),
         )
         # Создаем папку для профиля браузера:
         # app_root() -> папка рядом с бинарником в frozen-режиме, корень проекта при разработке.
@@ -161,37 +155,49 @@ class GoldenAppleParser(BaseParser):
     def _page_diagnostics(self, page) -> str:
         """
         Короткий слепок состояния страницы для диагностики.
-
-        Раньше здесь стоял suppress на каждый вызов, из-за чего «вызов упал»
-        и «страница пустая» выглядели в логе одинаково — именно поэтому в
-        предыдущем логе title и текст были пустыми, а что произошло на самом
-        деле, осталось неизвестным. Теперь каждая проверка помечена явно.
         """
-        parts: List[str] = []
+        # 1. Статус ответа
+        status_val = self._last_document_status if self._last_document_status else 'нет ответа'
+        status_part = f"http_status={status_val}"
 
-        parts.append(f"http_status={self._last_document_status if self._last_document_status else 'нет ответа'}")
+        # 2. URL страницы
+        if page:
+            url_part = f"url={page.url}"
+        else:
+            url_part = "url=неизвестен"
 
-        with suppress(Exception):
-            parts.append(f"url={page.url}")
-
+        # 3. Заголовок (Title)
         try:
             title = page.title()
-            parts.append(f"title={title!r}")
+            title_part = f"title={title!r}"
         except Exception as e:
-            parts.append(f"title=ошибка({str(e).splitlines()[0]})")
+            first_line = str(e).splitlines()[0] if str(e) else UNKNOWN_ERROR_MSG
+            title_part = f"title=ошибка({first_line})"
 
+        # 4. Текст страницы (Snippet)
         try:
             body_text = page.inner_text("body", timeout=5000)
             snippet = " ".join(body_text.split())[:200]
-            parts.append(f"текст={snippet!r}" if snippet else "текст=СТРАНИЦА ПУСТАЯ")
+            text_part = f"текст={snippet!r}" if snippet else "текст=СТРАНИЦА ПУСТАЯ"
         except Exception as e:
-            # Именно этот случай был в прошлом логе: страница была занята навигацией.
-            parts.append(f"текст=не удалось прочитать ({str(e).splitlines()[0]})")
+            first_line = str(e).splitlines()[0] if str(e) else UNKNOWN_ERROR_MSG
+            text_part = f"текст=не удалось прочитать ({first_line})"
 
+        # 5. Инициализируем список в один шаг (Литерал списка)
+        parts: list[str] = [
+            status_part,
+            url_part,
+            title_part,
+            text_part,
+        ]
+
+        # 6. Добавляем информацию о неудачных запросах, если они есть
         if self._failed_requests:
-            parts.append(f"неудачные запросы ({len(self._failed_requests)}): {self._failed_requests[:3]}")
+            failed_part = f"неудачные запросы ({len(self._failed_requests)}): {self._failed_requests[:3]}"
+            parts.append(failed_part)
 
         return " | ".join(parts)
+
 
     def _detect_block_reason(self) -> Optional[str]:
         """
@@ -206,29 +212,21 @@ class GoldenAppleParser(BaseParser):
 
         if status in (401, 403, 429):
             return (
-                f"Сайт вернул HTTP {status} — запрос заблокирован защитой. "
-                "Чаще всего это антибот по IP-адресу сервера."
+                f"Сайт вернул HTTP {status} — запрос заблокирован защитой. Чаще всего это антибот по IP-адресу сервера."
             )
 
         if status is not None and status >= 500:
             return f"Сайт вернул HTTP {status} — проблема на стороне сайта, попробуйте позже."
 
         if status is None and self._failed_requests:
-            return (
-                "Главный документ не загрузился, сетевые ошибки: "
-                + "; ".join(self._failed_requests[:3])
-            )
+            return "Главный документ не загрузился, сетевые ошибки: " + "; ".join(self._failed_requests[:3])
 
         return None
 
     def _apply_browsers_path(self) -> None:
         """
         Определяет каталог с Chromium и выставляет PLAYWRIGHT_BROWSERS_PATH.
-
-        Вызывается в момент запуска парсинга, а не при инициализации пакета:
-        браузер нужен не всем парсерам проекта. Имя папки с упакованным
-        браузером берётся из конфигурации этого парсера, поэтому Citadel
-        и Gardarika на него не влияют.
+        Вызывается в момент запуска парсинга.
         """
         browsers_dir = self._cfg_str("BROWSERS_DIR_NAME", BROWSERS_DIR_NAME_FALLBACK)
         resolved = resolve_playwright_browsers_path(browsers_dir)
@@ -264,24 +262,16 @@ class GoldenAppleParser(BaseParser):
         """
         Определяет режим отрисовки браузера.
 
-        По умолчанию используется headless: он проверен на Windows и Linux,
-        проходит антибот-проверку и заметно экономнее по ресурсам. Режим по
-        умолчанию не требует ни X-сервера, ни виртуального дисплея.
+        Значение задаётся константой GoldenAppleConfig.DEFAULT_HEADLESS.
+        Переопределения через переменные окружения и .env намеренно нет:
+        заказчик работает через графический интерфейс и не настраивает парсер.
+        На этапе разработки такая возможность была нужна, чтобы перебирать
+        режимы экспериментально без пересборки программы.
 
-        Управляется переменной окружения GOLDAPPLE_HEADLESS:
-          "1"/"true"/"yes"/"on"  — принудительно headless (то же, что по умолчанию)
-          "0"/"false"/"no"/"off" — обычный браузер с отрисовкой (нужен DISPLAY)
-          не задана              — headless
-
-        Ранее по умолчанию выбирался обычный браузер на основании наличия
-        DISPLAY, но эксперимент показал, что headless работает не хуже, а
-        потребляет меньше ресурсов. Поэтому поведение изменено.
+        Выбран headless: он проверен на Windows и Linux, проходит антибот-
+        проверку, заметно экономнее по ресурсам и не требует ни X-сервера,
+        ни виртуального дисплея.
         """
-        raw = os.environ.get(self._cfg_str("HEADLESS_ENV_VAR", "GOLDAPPLE_HEADLESS"), "").strip().lower()
-
-        if raw in {"0", "false", "no", "off"}:
-            return False
-
         return self._cfg_bool("DEFAULT_HEADLESS", True)
 
     def _wait_for_challenge_to_pass(self, page, timeout_ms: int = 45000) -> bool:
@@ -292,7 +282,7 @@ class GoldenAppleParser(BaseParser):
           * HTTP 200, но тело — один UUID вроде '9b858593-3bcb-4bd0-8fcb-f9707aa1dcc0'
           * title: 'Loading https://goldapple.ru/...', затем 'Gold Apple — checking device'
 
-        ВАЖНО: 'checking device' — это всё ещё ПРОВЕРОКА, а не каталог.
+        ВАЖНО: 'checking device' — это всё ещё ПРОВЕРКА, а не каталог.
         Раньше любая смена заголовка считалась успехом, из-за чего парсер
         тратил по 60 секунд на каждую попытку и рапортовал «проверка пройдена»,
         хотя каталог так и не появился.
@@ -319,7 +309,8 @@ class GoldenAppleParser(BaseParser):
 
             try:
                 title = page.title() or ""
-            except Exception:
+            except Exception as e:
+                logger.debug("Ошибка определения заголовка: %s", e)
                 title = ""
 
             if not isinstance(title, str):
@@ -338,7 +329,8 @@ class GoldenAppleParser(BaseParser):
         # если заголовок всё ещё про проверку, антибот нас не пустил.
         try:
             final_title = page.title() or ""
-        except Exception:
+        except Exception as e:
+            logger.debug("Ошибка определения заголовка: %s", e)
             final_title = ""
 
         if "checking device" in final_title.lower():
@@ -406,9 +398,7 @@ class GoldenAppleParser(BaseParser):
 
                 self._smart_sleep(CONTENT_RETRY_PAUSE)
 
-        raise RuntimeError(
-            f"Не удалось прочитать HTML страницы после {attempts} попыток: {last_error}"
-        ) from last_error
+        raise RuntimeError(f"Не удалось прочитать HTML страницы после {attempts} попыток: {last_error}") from last_error
 
     def load_catalog_page(self, page, url: str) -> Any:
         """Загрузка страницы каталога с защитой от Lazy-Render скрытого режима."""
@@ -424,8 +414,8 @@ class GoldenAppleParser(BaseParser):
             # Ждем прикрепления тега в DOM (attached)
             try:
                 page.locator("article").first.wait_for(state="attached", timeout=60000)
-            except Exception as e:
-                first_line = str(e).splitlines()[0] if str(e) else "Unknown error"
+            except Exception as err:
+                first_line = str(err).splitlines()[0] if str(err) else UNKNOWN_ERROR_MSG
                 # Раньше здесь стоял logger.debug, из-за чего главная проблема
                 # (каталог не отрендерился) была полностью невидима.
                 logger.warning(
@@ -437,35 +427,31 @@ class GoldenAppleParser(BaseParser):
                 # Возможно, мы попали на антибот-проверку и просто не дождались
                 # её завершения — даём ей ещё один шанс перед вердиктом.
                 if self._wait_for_challenge_to_pass(page):
-                    logger.info(
-                        "Каталог отрисован после прохождения проверки (страница №%s)", self.current_page
-                    )
+                    logger.info("Каталог отрисован после прохождения проверки (страница №%s)", self.current_page)
                 else:
                     diagnostics = self._page_diagnostics(page)
                     logger.warning("Диагностика страницы: %s", diagnostics)
 
                     block_reason = self._detect_block_reason()
                     if block_reason:
-                        raise ExceptionStopParser(block_reason) from e
+                        raise ExceptionStopParser(block_reason) from err
 
                     # Проверка устройства не завершилась — дальше ждать бессмысленно,
                     # каждая страница каталога будет упираться в тот же антибот.
                     # Останавливаемся сразу, вместо ~2 минут бесполезного ожидания.
                     try:
                         final_title = (page.title() or "").lower()
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Ошибка создания заголовка: %s", e)
                         final_title = ""
 
                     if "checking device" in final_title:
                         raise ExceptionStopParser(
                             "Антибот не пускает: проверка устройства не пройдена. "
                             "Нужен другой IP-адрес или residential-прокси."
-                        ) from e
+                        ) from err
 
             # ЭМУЛЯЦИЯ СКРОЛЛА:
-            # Это вспомогательная операция для lazy-render. Раньше её исключение
-            # ("Execution context was destroyed") обрывало весь парсинг,
-            # хотя потеря скролла ничего критичного не означает.
             try:
                 page.evaluate("window.scrollTo(0, 2500);")
             except Exception as scroll_err:
@@ -555,93 +541,47 @@ class GoldenAppleParser(BaseParser):
             # настоящим Chrome/153 сайт отдаёт отказ, с Chrome/124 — пропускает.
             # См. константу HEADLESS_USER_AGENT и комментарий ниже.
             #
-            # РЕЖИМ ОТРИСОВКИ.
-            #
-            # Управляется переменной окружения GOLDAPPLE_HEADLESS, что позволяет
-            # проводить эксперимент, не правя код и не пересобирая бинарник:
-            #   GOLDAPPLE_HEADLESS=1 — принудительно headless (экономия ресурсов)
-            #   GOLDAPPLE_HEADLESS=0 — принудительно обычный браузер
-            #   не задана            — автоопределение (по умолчанию)
-            #
-            # Автоопределение: на Linux требуется DISPLAY, на Windows обычный режим
-            # работает без X-сервера, поэтому проверка только для POSIX.
+            # РЕЖИМ ОТРИСОВКИ задаётся константой GoldenAppleConfig.DEFAULT_HEADLESS.
+            # Переопределения через окружение нет: настройка нужна была только
+            # при разработке, заказчик работает через графический интерфейс.
             headless_mode = self._resolve_headless()
-            logger.info(
-                "Режим отрисовки: %s (GOLDAPPLE_HEADLESS=%s)",
-                "headless" if headless_mode else "обычный браузер",
-                os.environ.get("GOLDAPPLE_HEADLESS", "не задана"),
-            )
+            logger.info("Режим отрисовки: %s", "headless" if headless_mode else "обычный браузер")
             if headless_mode:
-                logger.info(
-                    "Отпечаток headless: User-Agent=Chrome/124, WebGL отключён (--disable-gpu)."
-                )
+                logger.info("Отпечаток headless: User-Agent=Chrome/124, WebGL отключён (--disable-gpu).")
 
             launch_args = [
-                    "--disable-blink-features=AutomationControlled",
-                    # ЭКОНОМИЯ РЕСУРСОВ. Эти флаги не трогают WebGL и не меняют
-                    # отпечаток устройства — они лишь отключают то, что парсеру
-                    # всё равно не нужно для сбора HTML.
-                    "--blink-settings=imagesEnabled=false",  # картинки не декодируются
-                    "--blink-settings=cssAnimations=false",  # анимации CSS
-                    "--disable-renderer-backgrounding=false",  # не мешаем рендеру
-                    "--force-prefers-reduced-motion",  # сайт меньше анимирует
-                ]
+                "--disable-blink-features=AutomationControlled",
+                # ЭКОНОМИЯ РЕСУРСОВ. Эти флаги не трогают WebGL и не меняют
+                # отпечаток устройства — они лишь отключают то, что парсеру
+                # всё равно не нужно для сбора HTML.
+                "--blink-settings=imagesEnabled=false",  # картинки не декодируются
+                "--blink-settings=cssAnimations=false",  # анимации CSS
+                "--disable-renderer-backgrounding=false",  # не мешаем рендеру
+                "--force-prefers-reduced-motion",  # сайт меньше анимирует
+            ]
 
-            # Факторы, влияющие на прохождение антибот-проверки, вынесены в
-            # переменные окружения. Причина: при переводе парсера на текущую
-            # конфигурацию изменялось сразу несколько параметров, из-за чего
-            # непонятно, какой именно вызывает отказ. Теперь каждый можно
-            # переключить отдельно, не пересобирая бинарник.
-            #
-            # Исходно (рабочая конфигурация) stealth был СЛОМАН: в playwright_stealth
-            # 2.x нет функции stealth_sync, импорт падал и подавлялся. То есть
-            # navigator.webdriver был равен true, и сайт всё равно пропускал.
-            # Стоит проверить, не вредят ли подмены playwright_stealth.
-
-            # ОТПЕЧАТОК БРАУЗЕРА зависит от режима отрисовки.
-            #
-            # Это установлено экспериментально, а не догадками. На Windows
-            # проверялись две конфигурации, и обе работают, но они РАЗНЫЕ:
-            #
-            #   окно     -> настоящий UA, GPU включён          (проверено на Linux)
-            #   headless -> подменный UA Chrome/124, GPU выкл   (проверено на Windows)
-            #
-            # Что важно: в headless подмена UA не «устарела», а наоборот
-            # необходима. Без неё (настоящий Chrome/153) сайт отдаёт
-            # 'checking device'. Ранее здесь стоял зашитый Chrome/124, и я
-            # счёл его ошибкой и убрал — из-за чего headless перестал работать.
-            #
-            # --disable-gpu в headless тоже нужен: без него включается
-            # программный рендеринг SwiftShader, который и отвергают.
-            #
-            # Причина такого поведения для бота неясна, вероятно он проверяет
-            # согласованность сигналов с заявленной версией.
             if self._cfg_bool("HEADLESS_DISABLE_GPU", True) and headless_mode:
                 launch_args.append("--disable-gpu")
 
-            launch_kwargs = dict(
-                user_data_dir=self.user_data_dir,
-                headless=headless_mode,
-                args=launch_args,
-                viewport={"width": 1366, "height": 768},
-                locale="ru-RU",
-                timezone_id="Europe/Moscow",
+            launch_kwargs: dict = {
+                "user_data_dir": self.user_data_dir,
+                "headless": headless_mode,
+                "args": launch_args,
+                "viewport": {"width": 1366, "height": 768},
+                "locale": "ru-RU",
+                "timezone_id": "Europe/Moscow",
                 # locale выставлен выше, поэтому заголовок должен ему соответствовать,
                 # иначе это ещё одно расхождение в отпечатке.
-                extra_http_headers={"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
-            )
+                "extra_http_headers": {"Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"},
+            }
 
-            # Подмена User-Agent. В рабочей конфигурации был зашит Chrome/124.
-            # Значение можно вернуть через переменную окружения, чтобы проверить
-            # влияние версии на результат проверки.
+            # Подмена User-Agent обязательна в режиме без отрисовки —
+            # проверено экспериментом на Windows и Linux.
             if headless_mode:
-                # Подмена обязательна для headless — проверено экспериментом.
                 launch_kwargs["user_agent"] = self._cfg_str("HEADLESS_USER_AGENT", HEADLESS_USER_AGENT_FALLBACK)
                 logger.info("User-Agent подменён на Chrome/124 — требуется для headless.")
 
             # Флаги, нужные ТОЛЬКО на Linux. На Windows они бессмысленны,
-            # а --no-sandbox там ещё и ослабляет безопасность, поэтому
-            # добавляем их по необходимости, а не всегда.
             if sys.platform.startswith("linux"):
                 launch_kwargs["args"] += [
                     "--no-sandbox",  # обязательно при запуске под root
@@ -653,9 +593,9 @@ class GoldenAppleParser(BaseParser):
                 to_gui("🖥 Headless-режим: графическое окружение не требуется.")
             else:
                 logger.warning(
-                    "Включён обычный режим браузера с отрисовкой. Он расходует больше "
-                    "ресурсов, а headless проверен и работает. Вернуть headless: "
-                    "GOLDAPPLE_HEADLESS=1 (или снимите переменную)."
+                    "Включён обычный режим браузера с отрисовкой: он расходует больше "
+                    "ресурсов. Рекомендуемый режим без отрисовки задан константой "
+                    "GoldenAppleConfig.DEFAULT_HEADLESS."
                 )
                 to_gui("🖥 Обычный режим браузера с отрисовкой.")
 
@@ -750,8 +690,8 @@ class GoldenAppleParser(BaseParser):
                     route.abort()
                     return
 
-                url = request.url.lower()
-                if any(marker in url for marker in blocked_url_markers):
+                request_url = request.url.lower()
+                if any(marker in request_url for marker in blocked_url_markers):
                     route.abort()
                     return
 
@@ -774,9 +714,7 @@ class GoldenAppleParser(BaseParser):
             def _on_request_failed(request) -> None:
                 # Интересуют только первые несколько, чтобы лог не разрастался
                 if len(self._failed_requests) < 10:
-                    self._failed_requests.append(
-                        f"{request.resource_type} {request.url} :: {request.failure}"
-                    )
+                    self._failed_requests.append(f"{request.resource_type} {request.url} :: {request.failure}")
 
             context.on("response", _on_response)
             context.on("requestfailed", _on_request_failed)

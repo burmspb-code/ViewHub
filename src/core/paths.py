@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+
 def is_frozen() -> bool:
     """True, если код запущен из скомпилированного бинарника."""
     return bool(getattr(sys, "frozen", False))
