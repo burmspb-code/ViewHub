@@ -2,6 +2,7 @@ import os
 import sys
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -233,6 +234,121 @@ class TestLoadCatalogPage:
         mock_logger.exception.assert_called_once()
         template, page_number = mock_logger.exception.call_args[0]
         assert template % page_number == "Ошибка. Не удалось прогрузить страницу каталога №5"
+
+
+class TestSkippedAccounting:
+    """Учёт товаров, у которых не снялись детальные характеристики."""
+
+    @pytest.fixture
+    def mock_parser(self, mocker):
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        parser.current_page = 3
+        return parser
+
+    ITEM: ClassVar[dict] = {
+        "item_id": "99000037750",
+        "url": "https://goldapple.ru/catalog/parfjumerija/chanel-99000037750/",
+        "brand": "Chanel",
+        "name": "Coco Mademoiselle",
+    }
+
+    def test_failed_load_returns_none_and_logs_reason(self, mock_parser, mocker):
+        """
+        Неудачная загрузка возвращает None и пишет в лог короткую причину.
+
+        Регистрацию в учёте делает вызывающий код цикла: load_product_detail_page
+        отвечает только за открытие вкладки, а решение «считать товар
+        незаполненным» принимается там, где известен результат.
+        """
+        mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
+        mock_parser._smart_sleep = mocker.MagicMock()
+
+        context = mocker.MagicMock()
+        context.new_page.return_value.locator.return_value.first.wait_for.side_effect = Exception(
+            "Timeout 60000ms exceeded."
+        )
+        mock_parser._last_document_status = 503
+
+        result = mock_parser.load_product_detail_page(context, self.ITEM["url"], self.ITEM["item_id"])
+
+        assert result is None
+        assert mock_logger.exception.called
+
+        _template, item_id, url, reason = mock_logger.exception.call_args[0]
+        assert item_id == "99000037750"
+        assert url == self.ITEM["url"]
+        # Причина короткая и с HTTP-статусом, а не многострочный трейлбек
+        assert "таймаут" in reason
+        assert "HTTP 503" in reason
+
+    def test_describe_failure_detects_timeout_and_status(self, mock_parser):
+        """Ошибка Playwright превращается в короткую причину с HTTP-статусом."""
+        mock_parser._last_document_status = 429
+
+        reason = mock_parser._describe_load_failure(Exception("Timeout 60000ms exceeded."))
+
+        assert "таймаут" in reason
+        assert "HTTP 429" in reason
+
+    def test_describe_failure_keeps_unknown_error_text(self, mock_parser):
+        """Неизвестная ошибка не теряется: берётся первая строка."""
+        mock_parser._last_document_status = None
+
+        reason = mock_parser._describe_load_failure(Exception("Fatal\nSecond line"))
+
+        assert reason == "Fatal"
+
+    def test_register_skipped_captures_item_and_page(self, mock_parser):
+        """В учёт попадают артикул, ссылка и номер страницы каталога."""
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        row = mock_parser._skipped_rows[0]
+        assert row["item_id"] == "99000037750"
+        assert row["url"].endswith("99000037750/")
+        assert row["brand"] == "Chanel"
+        assert row["page_number"] == 3
+
+    def test_successful_extraction_is_not_registered(self, mock_parser):
+        """
+        Товар, с которого характеристики снялись, в учёт НЕ попадает.
+
+        Это главное свойство учёта: иначе в список незаполненных попадали бы
+        товары, у которых сайт просто не публикует описание.
+        """
+        assert mock_parser._skipped_rows == []
+
+    def test_flush_writes_rows_and_reports(self, mock_parser, mocker):
+        """Итог сохраняется в менеджер, а пользователь получает сообщение."""
+        messages = []
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+        mock_parser.manager.skipped_table_name.return_value = "goldapple_ru_parfjumerija_novinki_skipped"
+
+        mock_parser._flush_skipped(messages.append)
+
+        assert mock_parser.manager.save_skipped.called
+        assert any("99000037750" not in m and "артикул" in m for m in messages)
+        # Список очищен: повторный flush не задвоит записи
+        assert mock_parser._skipped_rows == []
+
+    def test_flush_without_failures_does_nothing(self, mock_parser):
+        """Пустой список не должен дёргать базу и засорять интерфейс."""
+        messages = []
+        mock_parser._flush_skipped(messages.append)
+
+        assert not mock_parser.manager.save_skipped.called
+        assert messages == []
+
+    def test_flush_failure_does_not_crash_parsing(self, mock_parser, mocker):
+        """Ошибка записи учёта не должна превращать парсинг в аварию."""
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+        mock_parser.manager.save_skipped.side_effect = Exception("диск заполнен")
+        messages = []
+
+        mock_parser._flush_skipped(messages.append)
+
+        assert any("Не удалось сохранить список" in m for m in messages)
+        assert mock_parser._skipped_rows == []
 
 
 class TestStablePageContent:

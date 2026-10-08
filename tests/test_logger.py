@@ -1,5 +1,7 @@
 import logging
 import os
+import sys
+
 import pytest
 
 from PyQt6.QtWidgets import QTextEdit
@@ -172,6 +174,77 @@ def test_register_gui_handler_keeps_file_handler(qtbot):
     for handler in (file_handler, stream_handler):
         root_logger.removeHandler(handler)
         handler.close()
+
+
+def test_gui_handler_strips_traceback(qtbot):
+    """
+    В панель журнала GUI не должен попадать трейлбек.
+
+    В логе на сервере ошибка загрузки карточки давала ~15 строк трейлбека
+    Playwright прямо в окне журнала. Подробности нужны в файле, в интерфейсе
+    достаточно строки о товаре.
+    """
+    handler = QTextEditHandler(MagicMock(spec=QTextEdit))
+    handler.setFormatter(logging.Formatter("[%(levelname)s]: %(message)s"))
+
+    try:
+        raise TimeoutError("Timeout 60000ms exceeded")
+    except TimeoutError:
+        record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="Не удалось загрузить карточку ID %s",
+            args=("99000037750",),
+            exc_info=sys.exc_info(),
+        )
+
+    with qtbot.wait_signal(handler.signals.append_log) as blocker:
+        handler.emit(record)
+
+    text = blocker.args[0]
+    assert "99000037750" in text
+    assert "Traceback" not in text
+    assert "TimeoutError" not in text
+    assert "exc_info" not in text
+
+
+def test_gui_handler_keeps_file_record_untouched(tmp_path, monkeypatch):
+    """
+    Обработчик GUI не должен портить запись для файлового логгера.
+
+    LogRecord общий для всех обработчиков: если бы GUI присвоил exc_info=None
+    напрямую, трейлбек исчез бы и из logs/viewhub.log.
+    """
+    from src.core import logger as logger_module
+
+    monkeypatch.setattr(logger_module, "_resolve_log_dir", lambda: tmp_path)
+
+    root_logger = logging.getLogger("")
+    original_handlers = list(root_logger.handlers)
+    root_logger.handlers.clear()
+
+    try:
+        setup_logger(name="", level=logging.INFO)
+        gui_handler = QTextEditHandler(MagicMock(spec=QTextEdit))
+        root_logger.addHandler(gui_handler)
+
+        try:
+            raise TimeoutError("Timeout 60000ms exceeded")
+        except TimeoutError:
+            logging.getLogger("test").exception("Не удалось загрузить карточку ID %s", "99000037750")
+
+        content = (tmp_path / "viewhub.log").read_text(encoding="utf-8")
+        assert "Traceback" in content
+        assert "TimeoutError" in content
+        assert gui_handler.widget is not None
+    finally:
+        for handler in list(root_logger.handlers):
+            handler.close()
+        root_logger.handlers.clear()
+        for handler in original_handlers:
+            root_logger.addHandler(handler)
 
 
 def test_setup_logger_adds_file_handler_once():

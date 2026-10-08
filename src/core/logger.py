@@ -1,6 +1,7 @@
 import logging
 
 from contextlib import suppress
+from copy import copy
 from logging import Logger
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -63,9 +64,23 @@ class QTextEditHandler(logging.Handler):
         self.widget.ensureCursorVisible()
 
     def emit(self, record):
-        if self.widget:
-            msg = self.format(record)
-            self.signals.append_log.emit(msg)
+        if not self.widget:
+            return
+
+        # В панель журнала уходит только текст сообщения, без трейлбека.
+        # Полный трейлбек при этом остаётся в файловом логе: на сервере
+        # разбирать инцидент приходится именно по logs/viewhub.log, а в GUI
+        # достаточно строки о том, какой товар не удалось загрузить.
+        #
+        # Запись копируется перед изменением: объект LogRecord общий для всех
+        # обработчиков, и его exc_text использует файловый логгер.
+        if record.exc_info or record.exc_text:
+            record = copy(record)
+            record.exc_info = None
+            record.exc_text = None
+
+        msg = self.format(record)
+        self.signals.append_log.emit(msg)
 
 
 def _resolve_log_dir() -> Path:

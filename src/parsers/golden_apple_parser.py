@@ -84,6 +84,11 @@ class GoldenAppleParser(BaseParser):
         self._last_document_status: Optional[int] = None
         # Список неудачных сетевых запросов для диагностики.
         self._failed_requests: List[str] = []
+        # Товары текущего прогона, у которых не удалось снять детальные данные.
+        # В основной таблице они лежат с заглушками, поэтому сбой парсера
+        # невозможно отличить от пустого описания на сайте. Этот список
+        # отделяет одно от другого и уходит в отдельную таблицу учёта.
+        self._skipped_rows: List[Dict[str, Any]] = []
 
         # Активный режим отрисовки фиксируем ЗДЕСЬ, а не только в run_parsing().
         # Раньше режим выводился в лог исключительно из run_parsing(), а это
@@ -147,10 +152,89 @@ class GoldenAppleParser(BaseParser):
             # Если пользователь нажал Отмена во время ожидания карточки, мгновенно выходим
             if not self._is_running:
                 raise ExceptionStopParser(PROCESS_CANCELLED_MSG) from e
-            logger.exception("Ошибка. Не удалось дождаться загрузки карточки ID %s", product_id)
+            # Файл лога получает полный трейлбек, окно журнала — короткую
+            # строку: сначала был использован logger.exception, из-за чего в GUI
+            # попадали 15 строк трейлбека на каждый неудачный товар.
+            # Причина фиксируется ДО логирования: в учёт сбоев товар попадёт
+            # с конкретным текстом ("таймаут ожидания заголовка", "антибот 403"),
+            # а не с общим "не удалось загрузить".
+            reason = self._describe_load_failure(e)
+            logger.exception("Не удалось загрузить карточку ID %s (%s). Причина: %s", product_id, product_url, reason)
+
             if page is not None:
-                page.close()
+                with suppress(Exception):
+                    page.close()
+
             return None
+
+    def _flush_skipped(self, to_gui) -> None:
+        """
+        Переносит накопленный список сбоев в базу и показывает итог пользователю.
+
+        Вызывается в finally, поэтому отчёт формируется и при штатном завершении,
+        и при остановке по кнопке, и при аварии. Отдельно перехватываем ошибку:
+        потеря отчёта о сбоях не должна превращать парсинг в аварию.
+        """
+        if not self._skipped_rows:
+            return
+
+        rows = list(self._skipped_rows)
+        self._skipped_rows.clear()
+
+        try:
+            self.manager.save_skipped(rows)
+        except Exception as e:
+            logger.exception("Не удалось сохранить учёт сбоев: %s", e)
+            to_gui(f"⚠️ Не удалось сохранить список незагруженных товаров: {e}")
+            return
+
+        logger.info("Товаров без детальных данных за прогон: %s", len(rows))
+        to_gui(
+            f"⚠️ Не удалось снять характеристики с {len(rows)} товаров. "
+            f"Полный список с артикулами и ссылками — в таблице "
+            f"{self.manager.skipped_table_name()}."
+        )
+
+    def _register_skipped(self, item: Dict[str, Any], reason: str) -> None:
+        """
+        Запоминает товар, у которого не снялись детальные характеристики.
+
+        В основной таблице такой товар сохраняется с заглушками
+        ("Описание отсутствует"), и по базе нельзя понять, был ли это сбой
+        парсера или сайт действительно не публикует описание. Учёт решает это:
+        сбой всегда попадает сюда, пустое описание на сайте — никогда.
+        """
+        self._skipped_rows.append(
+            {
+                "item_id": str(item.get("item_id") or "").strip(),
+                "url": item.get("url") or "",
+                "brand": item.get("brand"),
+                "name": item.get("name"),
+                "page_number": self.current_page,
+                "reason": reason,
+            }
+        )
+
+    def _describe_load_failure(self, error: Exception) -> str:
+        """Короткое описание причины, по которой карточка не открылась.
+
+        HTTP-статус берётся из self._last_document_status: он уже собран
+        обработчиком response на контексте, поэтому обращаться к умирающей
+        вкладке page не нужно.
+        """
+        error_text = str(error)
+        lowered = error_text.lower()
+
+        if "timeout" in lowered or "exceeded" in lowered:
+            reason = "таймаут ожидания заголовка карточки (60 с)"
+        else:
+            reason = (error_text.splitlines() or [UNKNOWN_ERROR_MSG])[0][:160]
+
+        status = self._last_document_status
+        if status:
+            reason += f", HTTP {status}"
+
+        return reason
 
     def _page_diagnostics(self, page) -> str:
         """
@@ -830,6 +914,7 @@ class GoldenAppleParser(BaseParser):
                         # --- БЛОК ДЛЯ БИТОГО URL ---
                         if not product_url or product_url in ["https://goldapple.ru", "https://goldapple.ru"]:
                             item.update(deep_data)
+                            self._register_skipped(item, "битая ссылка в каталоге")
 
                             # Записываем номер страницы прямо в словарь товара перед сохранением
                             item["page_number"] = self.current_page
@@ -850,9 +935,16 @@ class GoldenAppleParser(BaseParser):
                             except Exception as e:
                                 if not self._is_running:
                                     raise ExceptionStopParser("Процесс отменен пользователем.") from e
-                                # Ошибку гасим, данные останутся дефолтными
+                                # Ошибку гасим, данные останутся дефолтными, но товар
+                                # попадёт в учёт: характеристики с него не сняты.
+                                parse_error = (str(e).splitlines() or [UNKNOWN_ERROR_MSG])[0][:120]
+                                self._register_skipped(item, f"ошибка разбора карточки: {parse_error}")
                             finally:
                                 detail_page.close()
+                        else:
+                            # Карточка не открылась. Причина уже записана в лог
+                            # подробно, здесь нужен короткий итог для учёта.
+                            self._register_skipped(item, "карточка не загрузилась")
 
                         item.update(deep_data)
 
@@ -881,6 +973,11 @@ class GoldenAppleParser(BaseParser):
                     self.current_page += 1
 
             finally:
+                # Учёт сбоев сохраняется ПОСЛЕ остановки парсера и в finally:
+                # иначе при аварийной остановке или отмене пользователем список
+                # незакрытых карточек потерялся бы вместе с процессом.
+                self._flush_skipped(to_gui)
+
                 # Корректная очистка ресурсов: сначала страница, потом контекст
                 if "page" in locals() and not page.is_closed():
                     page.close()
