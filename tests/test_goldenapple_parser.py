@@ -7,7 +7,7 @@ from typing import ClassVar
 import pytest
 
 
-from src.parsers.golden_apple_parser import GoldenAppleParser
+from src.parsers.golden_apple_parser import MAX_SKIPPED_REPORT_LINES, GoldenAppleParser
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.database.sqlite_manager import DatabaseManager
@@ -273,14 +273,27 @@ class TestSkippedAccounting:
         result = mock_parser.load_product_detail_page(context, self.ITEM["url"], self.ITEM["item_id"])
 
         assert result is None
-        assert mock_logger.exception.called
+        assert mock_logger.warning.called
 
-        _template, item_id, url, reason = mock_logger.exception.call_args[0]
+        _template, item_id, reason = mock_logger.warning.call_args[0]
         assert item_id == "99000037750"
-        assert url == self.ITEM["url"]
         # Причина короткая и с HTTP-статусом, а не многострочный трейлбек
         assert "таймаут" in reason
         assert "HTTP 503" in reason
+
+    def test_failed_load_logs_no_traceback(self, mock_parser, mocker):
+        """Трейлбек Playwright не нужен: это штатный таймаут, а не авария."""
+        mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
+        mock_parser._smart_sleep = mocker.MagicMock()
+
+        context = mocker.MagicMock()
+        context.new_page.return_value.locator.return_value.first.wait_for.side_effect = Exception(
+            "Timeout 60000ms exceeded."
+        )
+
+        mock_parser.load_product_detail_page(context, self.ITEM["url"], self.ITEM["item_id"])
+
+        assert not mock_logger.exception.called
 
     def test_describe_failure_detects_timeout_and_status(self, mock_parser):
         """Ошибка Playwright превращается в короткую причину с HTTP-статусом."""
@@ -318,37 +331,54 @@ class TestSkippedAccounting:
         """
         assert mock_parser._skipped_rows == []
 
-    def test_flush_writes_rows_and_reports(self, mock_parser, mocker):
-        """Итог сохраняется в менеджер, а пользователь получает сообщение."""
+    def test_flush_reports_list_to_user(self, mock_parser):
+        """Пользователь получает список с артикулом, ссылкой и причиной."""
         messages = []
         mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
-        mock_parser.manager.skipped_table_name.return_value = "goldapple_ru_parfjumerija_novinki_skipped"
 
         mock_parser._flush_skipped(messages.append)
 
-        assert mock_parser.manager.save_skipped.called
-        assert any("99000037750" not in m and "артикул" in m for m in messages)
-        # Список очищен: повторный flush не задвоит записи
-        assert mock_parser._skipped_rows == []
+        text = "\n".join(messages)
+        assert "99000037750" in text
+        assert "Chanel" in text
+        assert self.ITEM["url"] in text
+        assert "карточка не загрузилась" in text
+
+    def test_flush_does_not_touch_database(self, mocker):
+        """Таблицы учёта в базе нет: flush ничего в БД не пишет."""
+        from src.database.sqlite_manager import DatabaseManager
+
+        real_manager = DatabaseManager()
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=real_manager)
+        parser.current_page = 1
+        parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        parser._flush_skipped(lambda m: None)
+
+        # У менеджера вообще нет методов работы с учётом сбоев.
+        assert not hasattr(real_manager, "save_skipped")
+        assert not hasattr(real_manager, "skipped_table_name")
 
     def test_flush_without_failures_does_nothing(self, mock_parser):
-        """Пустой список не должен дёргать базу и засорять интерфейс."""
+        """Пустой список не засоряет интерфейс."""
         messages = []
         mock_parser._flush_skipped(messages.append)
 
-        assert not mock_parser.manager.save_skipped.called
         assert messages == []
 
-    def test_flush_failure_does_not_crash_parsing(self, mock_parser, mocker):
-        """Ошибка записи учёта не должна превращать парсинг в аварию."""
-        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
-        mock_parser.manager.save_skipped.side_effect = Exception("диск заполнен")
+    def test_flush_caps_long_list(self, mock_parser):
+        """Длинный список обрезается, иначе панель вывода утонет в строках."""
         messages = []
+        for n in range(MAX_SKIPPED_REPORT_LINES + 20):
+            mock_parser._register_skipped({**self.ITEM, "item_id": str(n)}, "карточка не загрузилась")
 
         mock_parser._flush_skipped(messages.append)
 
-        assert any("Не удалось сохранить список" in m for m in messages)
-        assert mock_parser._skipped_rows == []
+        text = "\n".join(messages)
+        assert "35 шт" in text
+        assert "и ещё 20" in text
+        # В панели вывода только первые позиции, полный список — в файле лога
+        assert text.count("карточка не загрузилась") == MAX_SKIPPED_REPORT_LINES
 
 
 class TestStablePageContent:
