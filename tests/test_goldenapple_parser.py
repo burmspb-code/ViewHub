@@ -766,6 +766,40 @@ class TestRemovedItemsReport:
         # Товар, который на сайте есть, в списке отсутствует
         assert "Chanel" not in text
 
+    def test_report_mentions_section_not_site(self, parser):
+        """
+        Формулировка говорит про раздел, а не про сайт.
+
+        Проверено на живых данных: товар, отсутствующий в разделе новинок,
+        оказался перенесён в другой раздел и по ссылке открывается. Формулировка
+        «на сайте больше нет» вводила бы в заблуждение проверяющего.
+        """
+        parser._seen_item_ids = {"1"}
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        text = "\n".join(messages)
+        assert "КОТОРЫХ БОЛЬШЕ НЕТ В ЭТОМ РАЗДЕЛЕ" in text
+        assert "перенесены в другой раздел" in text
+        assert "на сайте их убрали" not in text
+
+    def test_report_shows_found_and_total(self, parser):
+        """В отчёте видно, сколько нашли в разделе и сколько лежит в базе."""
+        parser._seen_item_ids = {"1", "2", "3"}
+        parser.manager.get_items_for_removal_check.return_value = [
+            ("1", {"brand": "A", "name": "X", "url": "u", "page_number": 1, "in_stock": 1}),
+            ("2", {"brand": "B", "name": "Y", "url": "u", "page_number": 1, "in_stock": 1}),
+        ]
+        parser.manager.count_items.return_value = 5
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        text = "\n".join(messages)
+        assert "В разделе найдено за прогон: 3" in text
+        assert "Всего в базе: 5" in text
+
     def test_reports_new_count_and_total(self, parser):
         """В отчёте фигурируют оба числа: добавлено за прогон и всего в базе."""
         parser._seen_item_ids = {"1", "2"}
@@ -786,6 +820,7 @@ class TestRemovedItemsReport:
 
         text = "\n".join(messages)
         assert "не обнаружено" in text
+        assert "отсутствующих в этом разделе" in text
         assert "РАНЕЕ СОБРАННЫХ" not in text
 
     def test_shows_stock_flag_of_removed_item(self, parser):

@@ -322,18 +322,25 @@ class GoldenAppleParser(BaseParser):
             f"{self.current_page} (различных: {self._distinct_pages_seen()})."
         )
         to_gui(f"   За прогон сохранено новых товаров: {self._saved_count}")
+        to_gui(f"   В разделе найдено за прогон: {len(self._seen_item_ids)} (с учётом повторов на разных страницах)")
         to_gui(f"   Всего в базе: {self._db_item_count()}")
 
         if not removed:
-            to_gui("   Ранее собранных товаров, которых больше нет на сайте, не обнаружено.")
-            logger.info("Каталог пройден полностью, удалённых товаров не найдено (сохранено: %s).", self._saved_count)
+            to_gui("   Ранее собранных товаров, отсутствующих в этом разделе, не обнаружено.")
+            logger.info(
+                "Каталог пройден полностью, товаров, отсутствующих в разделе, не найдено (сохранено: %s).",
+                self._saved_count,
+            )
             return
 
         to_gui("")
         to_gui(
-            f"⚠️ РАНЕЕ СОБРАННЫХ ТОВАРОВ НА САЙТЕ БОЛЬШЕ НЕТ: {len(removed)} шт."
+            f"⚠️ РАНЕЕ СОБРАННЫХ ТОВАРОВ, КОТОРЫХ БОЛЬШЕ НЕТ В ЭТОМ РАЗДЕЛЕ: {len(removed)} шт."
         )
-        to_gui("   Товары остались в базе, но на сайте их убрали. Сверьте вручную:")
+        to_gui(
+            "   Товары остались в базе, но в каталоге этого раздела их больше нет. Такие товары "
+            "могли быть перенесены в другой раздел — проверьте по ссылке:"
+        )
 
         for item_id, info in removed[:MAX_SKIPPED_REPORT_LINES]:
             to_gui(f"   • {item_id} — {info.get('brand') or '?'} / {info.get('name') or '?'}")
@@ -344,13 +351,13 @@ class GoldenAppleParser(BaseParser):
             to_gui(f"   … и ещё {len(removed) - MAX_SKIPPED_REPORT_LINES}. Полный список — в logs/viewhub.log.")
 
         logger.info(
-            "Каталог пройден полностью: сохранено %s, на сайте отсутствует %s ранее собранных товаров.",
+            "Каталог пройден полностью: сохранено %s, отсутствует в разделе %s ранее собранных товаров.",
             self._saved_count,
             len(removed),
         )
         for item_id, info in removed:
             logger.warning(
-                "Товара на сайте больше нет: ID=%s, бренд=%s, название=%s, страница=%s, "
+                "Товара в этом разделе больше нет: ID=%s, бренд=%s, название=%s, страница=%s, "
                 "наличие=%s, ссылка=%s",
                 item_id,
                 info.get("brand"),
