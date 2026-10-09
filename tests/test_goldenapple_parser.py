@@ -8,6 +8,7 @@ import pytest
 
 
 from src.parsers.golden_apple_parser import (
+    MAX_PAGES_PAST_DB,
     MAX_SKIPPED_REPORT_LINES,
     PROCESS_CANCELLED_MSG,
     GoldenAppleParser,
@@ -535,17 +536,37 @@ class TestRepeatedPageDetection:
         # Номер, который сервер отдаёт вместо запрошенного, попадает в текст
         assert "12" in reason
 
-    def test_repeat_of_other_page_reports_catalog_shrink(self, mock_parser):
-        """Повтор не первой страницы — каталог перестал расти, а не антибот."""
+    def test_repeat_inside_db_reports_both_causes(self, mock_parser):
+        """
+        Повтор не первой страницы внутри границ базы — причина неоднозначна.
+
+        Запрошенная страница по идее существует, но сервер её не отдал. Это
+        одинаково выглядит и при блокировке, и при сокращении каталога, поэтому
+        сообщение называет оба варианта и честно признаёт: отчёт о исчезнувших
+        товарах недостоверен.
+        """
         mock_parser._track_page_fingerprint(self.PAGE_ONE)  # страница 1
         mock_parser._track_page_fingerprint(["90", "91"])  # страница 2 — другая
         mock_parser._track_page_fingerprint(["90", "91"])  # повтор
+        mock_parser.current_page = 3
+
+        reason = mock_parser._repeated_page_reason(past_db=False)
+
+        assert "защита от роботов" in reason
+        assert "сократился" in reason
+        assert "обход неполный" in reason
+
+    def test_repeat_past_db_reports_mismatch(self, mock_parser):
+        """Тот же повтор, но уже за границей базы — тут нужен другой текст."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(["90", "91"])
+        mock_parser._track_page_fingerprint(["90", "91"])
         mock_parser.current_page = 31
 
-        reason = mock_parser._repeated_page_reason()
+        reason = mock_parser._repeated_page_reason(past_db=True)
 
-        assert "защита от роботов" not in reason
-        assert "стало меньше" in reason
+        assert "не совпадают" in reason
+        assert "сократился" in reason
 
     def test_streak_resets_after_different_page(self, mock_parser):
         """Прерванная серия повторов не тянется через разные страницы."""
@@ -677,8 +698,9 @@ class TestRepeatedPageIntegration:
 
         verdict = self._run(parser, gui, requested)
 
-        assert "Отработан весь каталог" in verdict
+        assert "Каталог полностью обработан" in verdict
         assert "стало меньше" not in verdict
+        assert "защита от роботов" not in verdict
 
     def test_normal_collects_remaining_pages(self, mocker, tmp_path):
         """Нормальный случай: новинки со страниц 3-5 собраны, каталог отработан."""
@@ -688,16 +710,115 @@ class TestRepeatedPageIntegration:
 
         for page in site_ids[2:]:
             assert set(page) <= set(mgr.check_existing_items_with_pages(page))
-        assert "Отработан весь каталог" in verdict
+        assert "Каталог полностью обработан" in verdict
 
-    def test_shrunk_catalog_reports_mismatch(self, mocker, tmp_path):
-        """Каталог сократился: номера не совпадают, новинок всё равно нет."""
+    def test_shrunk_catalog_does_not_report_removed(self, mocker, tmp_path):
+        """
+        Сокращение каталога не должно давать отчёт об удалённых товарах.
+
+        В базе 4 страницы, на сайте 2. Парсер останавливается на третьей
+        странице, потому что сервер отдаёт вторую. Страницы 3-4 в базе мы не
+        видели, но это не значит, что их товары исчезли — их просто некуда было
+        посмотреть. Отчёт в этом случае недостоверен и не показывается.
+        """
         parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 4, 2, antibot=False)
 
         verdict = self._run(parser, gui, requested)
 
-        assert "стало меньше" in verdict
-        assert "защита от роботов" not in verdict
+        assert "Каталог полностью обработан" not in verdict
+        assert "РАНЕЕ СОБРАННЫХ" not in verdict
+        # Причина названа, обе версии указаны
+        assert "сократился" in verdict
+        assert "обход неполный" in verdict
+
+
+class TestRemovedItemsReport:
+    """
+    Отчёт о товарах, исчезнувших с сайта.
+
+    Показывается ТОЛЬКО при полностью пройденном каталоге. При отмене или
+    блокировке часть страниц не открывалась, и их товары были бы объявлены
+    удалёнными ошибочно.
+    """
+
+    @pytest.fixture
+    def parser(self, mocker):
+        p = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        p.current_page = 5
+        p._saved_count = 12
+        p.manager.get_items_for_removal_check.return_value = [
+            ("1", {"brand": "Chanel", "name": "A", "url": "https://u/1", "page_number": 1, "in_stock": 1}),
+            ("2", {"brand": "Dior", "name": "B", "url": "https://u/2", "page_number": 2, "in_stock": 0}),
+        ]
+        p.manager.count_items.return_value = 2
+        return p
+
+    def test_reports_only_missing_items(self, parser):
+        """В отчёт попадают лишь те товары, которых не было на страницах."""
+        parser._seen_item_ids = {"1", "3", "4"}
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        text = "\n".join(messages)
+        assert "1 шт" in text
+        assert "Dior" in text
+        # Товар, который на сайте есть, в списке отсутствует
+        assert "Chanel" not in text
+
+    def test_reports_new_count_and_total(self, parser):
+        """В отчёте фигурируют оба числа: добавлено за прогон и всего в базе."""
+        parser._seen_item_ids = {"1", "2"}
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        text = "\n".join(messages)
+        assert "сохранено новых товаров: 12" in text
+        assert "Всего в базе: 2" in text
+
+    def test_reports_absence_of_removed(self, parser):
+        """Если ничего не пропало — об этом сказано прямо, без пустого списка."""
+        parser._seen_item_ids = {"1", "2"}
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        text = "\n".join(messages)
+        assert "не обнаружено" in text
+        assert "РАНЕЕ СОБРАННЫХ" not in text
+
+    def test_shows_stock_flag_of_removed_item(self, parser):
+        """Признак наличия выводится: снятый с продажи товар виден как 0."""
+        parser._seen_item_ids = {"1"}
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        assert "наличие: 0" in "\n".join(messages)
+
+    def test_caps_long_removed_list(self, parser):
+        """Длинный список обрезается, полный — в лог."""
+        parser.manager.get_items_for_removal_check.return_value = [
+            (str(n), {"brand": "B", "name": "N", "url": "u", "page_number": 1, "in_stock": 1})
+            for n in range(MAX_SKIPPED_REPORT_LINES + 10)
+        ]
+
+        messages = []
+        parser._report_full_catalog(messages.append, 4)
+
+        text = "\n".join(messages)
+        assert "и ещё 10" in text
+        assert text.count("   • ") == MAX_SKIPPED_REPORT_LINES
+
+    def test_distinct_pages_counter(self, parser):
+        """Обход считается по РАЗЛИЧНЫМ страницам, а не по числу запросов."""
+        parser._track_page_fingerprint(["1", "2"])
+        parser._track_page_fingerprint(["1", "2"])
+        parser._track_page_fingerprint(["3", "4"])
+
+        # Три запроса, но разных страниц две
+        assert parser._distinct_pages_seen() == 2
 
 
 class TestStablePageContent:
@@ -1214,8 +1335,15 @@ class TestRunParsing:
         # Проверяем, что страница увеличилась для проверки следующей
         assert mock_parser.current_page == 2
 
-    def test_run_parsing_pagination_loop_detection(self, mock_parser, mocker):
-        """5. Сценарий обнаружения зацикливания пагинации."""
+    def test_run_parsing_exhausts_reserve_past_db(self, mock_parser, mocker):
+        """
+        Граница базы пройдена — парсер идёт дальше до исчерпания запаса.
+
+        Раньше он останавливался сразу за пределами базы, из-за чего отчёт о
+        товарах, исчезнувших с сайта, был недостоверен. Теперь он честно
+        проходит ещё MAX_PAGES_PAST_DB страниц: если каталог вырос, конец
+        найдётся; если вырос сильно — сообщит, что не дотянул.
+        """
         mock_playwright = mocker.patch("src.parsers.golden_apple_parser.sync_playwright")
 
         mock_p = mocker.MagicMock()
@@ -1229,9 +1357,7 @@ class TestRunParsing:
         mock_parser.count_and_get_products_on_page = mocker.MagicMock(return_value=[mocker.MagicMock()])
         mock_parser._smart_sleep = mocker.MagicMock()
 
-        # Честный конец каталога: на каждой странице свой набор артикулов,
-        # и все они уже собраны. Именно этот случай раньше описывался
-        # как «зацикливание пагинации».
+        # Каждая страница отдаёт свой набор — повторов нет
         def page_items(current_page):
             item_id = f"item-page-{current_page}"
             return [
@@ -1241,13 +1367,15 @@ class TestRunParsing:
         mock_parser.extractor.extract_data.side_effect = lambda cards: page_items(mock_parser.current_page)
         mock_parser.manager.check_existing_items_with_pages.side_effect = lambda ids: {i: 1 for i in ids}
 
-        # В базе 3 страницы — парсер дойдёт до 4-й и там честно остановится
+        # В базе 3 страницы: пройдено 3 + запас из MAX_PAGES_PAST_DB
         mock_parser.manager.get_last_page_number.return_value = 3
 
         list(mock_parser.run_parsing())
 
-        # Остановились на странице, следующей за максимумом в БД
-        assert mock_parser.current_page == 4
+        # Пройдено: 3 страницы базы + запас. current_page не увеличивается
+        # после break, поэтому указывает на последнюю открытую страницу.
+        assert mock_parser.current_page == 3 + MAX_PAGES_PAST_DB
+        assert mock_parser._pages_past_db == MAX_PAGES_PAST_DB
 
     def test_run_parsing_broken_url_handling(self, mock_parser, mocker):
         """6. Сценарий обработки битого URL товара."""
