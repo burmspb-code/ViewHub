@@ -533,6 +533,20 @@ class MainWindow(QWidget):
 
     def show_parsing_page(self):
         """Открытие меню парсинга."""
+        # Парсер продолжает работать, пока пользователь ходит по другим
+        # разделам. Создавать поверх него новый нельзя: старый поток продолжит
+        # писать в ту же базу, а его воркер и лог окажутся заменены — отменять
+        # и читать журнал было бы уже нечего. Кнопка «НАЧАТЬ» и так заблокирована
+        # на время прогона, здесь нужно только не создавать дубль.
+        if hasattr(self, "parser_thread") and self.parser_thread.isRunning():
+            self.stack.setCurrentIndex(4)
+            # append, а не setText: панель вывода жива, в ней идёт прогресс.
+            self.result_display.append(
+                "ℹ️ Парсинг уже идёт в фоне. Новый запуск станет доступен после "
+                "его завершения или остановки кнопкой «ОТМЕНИТЬ»."
+            )
+            return
+
         try:
             # Запускаем функцию сборки парсера
             prepare_parsing(self)
@@ -554,6 +568,27 @@ class MainWindow(QWidget):
             self.result_display.setText(
                 f"⚠️ Внимание\n❌ {e!s}\n\nПожалуйста, устраните проблему и нажмите кнопку 'Парсинг' еще раз."
             )
+
+    def closeEvent(self, event):
+        """
+        Корректно закрывает окно во время работающего парсинга.
+
+        Без этого Qt уничтожает живой QThread и приложение падает с
+        «QThread: Destroyed while thread is still running».
+        """
+        if hasattr(self, "parser_thread") and self.parser_thread.isRunning():
+            logger.info("Закрытие окна во время парсинга: останавливаем поток.")
+
+            with suppress(Exception):
+                self.parser_worker.stop()
+
+            with suppress(Exception):
+                self.parser_thread.quit()
+                # Ждём до 15 секунд: этого хватает, чтобы доехать до ближайшей
+                # проверки флага отмены в цикле парсера.
+                self.parser_thread.wait(15000)
+
+        event.accept()
 
     def show_settings_page(self):
         """Переключить стек на страницу настроек (Индекс 2)."""

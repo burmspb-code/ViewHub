@@ -7,7 +7,11 @@ from typing import ClassVar
 import pytest
 
 
-from src.parsers.golden_apple_parser import MAX_SKIPPED_REPORT_LINES, GoldenAppleParser
+from src.parsers.golden_apple_parser import (
+    MAX_SKIPPED_REPORT_LINES,
+    PROCESS_CANCELLED_MSG,
+    GoldenAppleParser,
+)
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.database.sqlite_manager import DatabaseManager
@@ -379,6 +383,98 @@ class TestSkippedAccounting:
         assert "и ещё 20" in text
         # В панели вывода только первые позиции, полный список — в файле лога
         assert text.count("карточка не загрузилась") == MAX_SKIPPED_REPORT_LINES
+
+    def test_flush_clears_list_after_report(self, mock_parser):
+        """
+        После отчёта список очищается.
+
+        Отчёт — сигнал к решению «перезапускать или нет», а не архив.
+        Следующий прогон всё равно начнётся с первой страницы и пройдёт по тем
+        же товарам заново, копить незачем.
+        """
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        mock_parser._flush_skipped(lambda m: None)
+
+        assert mock_parser._skipped_rows == []
+
+    def test_flush_deduplicates_by_item_id(self, mock_parser):
+        """
+        Один товар, упавший на двух страницах, показывается один раз.
+
+        При перетусовке каталога прямо во время обхода товар может встретиться
+        повторно с другим номером страницы — без дедупликации отчёт врёт.
+        """
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+        mock_parser._register_skipped({**self.ITEM, "page_number": 9}, "карточка не загрузилась")
+
+        messages = []
+        mock_parser._flush_skipped(messages.append)
+
+        text = "\n".join(messages)
+        assert "1 шт" in text
+        # Один товар — одна строка с маркером, даже если встречался дважды
+        assert text.count("   • ") == 1
+        # Номер страницы остаётся от первого попадания, а не от второго
+        assert "99000037750 — Chanel" in text
+
+
+class TestRunParsingResetsState:
+    """
+    Состояние прогона обнуляется в начале run_parsing().
+
+    Объект парсера переиспользуется между нажатиями «НАЧАТЬ», поэтому раньше
+    второй запуск с другой ссылкой продолжал со страницы, на которой остановился
+    предыдущий, и сразу выдавал ложное «зацикливание пагинации».
+    """
+
+    def test_state_reset_before_browser_starts(self, mocker):
+        """Счётчики и флаг отмены сбрасываются до первой загрузки страницы."""
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._smart_sleep = lambda s: None
+
+        # Состояние, оставшееся от «предыдущего» прогона
+        parser.current_page = 26
+        parser.empty_pages_count = 1
+        parser._is_running = False
+        parser._register_skipped({"item_id": "1", "url": "u"}, "старый сбой")
+
+        mock_pw = mocker.patch("src.parsers.golden_apple_parser.sync_playwright")
+        mock_pw.return_value.__enter__.return_value = mocker.MagicMock()
+
+        # Запускаем генератор: тело выполняется до первой загрузки страницы.
+        # Останавливаемся тут, чтобы не уходить в реальный Playwright.
+        mocker.patch.object(parser, "load_catalog_page", side_effect=ExceptionStopParser("стоп"))
+
+        try:
+            next(parser.run_parsing(), None)
+        except ExceptionStopParser:
+            pass
+
+        assert parser.current_page == 1
+        assert parser.empty_pages_count == 0
+        assert parser._is_running is True
+        assert parser._skipped_rows == []
+
+    def test_second_run_starts_from_first_page(self, mocker):
+        """Два прогона подряд — оба начинают с первой страницы."""
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._smart_sleep = lambda s: None
+
+        seen_pages = []
+        mocker.patch.object(parser, "load_catalog_page", side_effect=ExceptionStopParser("стоп"))
+
+        mock_pw = mocker.patch("src.parsers.golden_apple_parser.sync_playwright")
+        mock_pw.return_value.__enter__.return_value = mocker.MagicMock()
+
+        for _ in range(2):
+            try:
+                next(parser.run_parsing(), None)
+            except ExceptionStopParser:
+                pass
+            seen_pages.append(parser.current_page)
+
+        assert seen_pages == [1, 1]
 
 
 class TestStablePageContent:
@@ -840,9 +936,16 @@ class TestRunParsing:
         mock_p.chromium.launch_persistent_context.return_value = mock_context
         mock_context.new_page.return_value = mock_page
 
-        # Имитируем отмену при первой проверке
-        mock_parser._is_running = False
         mock_parser._smart_sleep = mocker.MagicMock()
+
+        # Имитируем отмену ПОСЛЕ запуска прогона: раньше отмена выставлялась
+        # до run_parsing(), но теперь он сбрасывает флаг на старте, поэтому
+        # реальная отмена приходит уже во время работы.
+        def cancel_during_run(*args, **kwargs):
+            mock_parser._is_running = False
+            raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
+
+        mock_parser.load_catalog_page = mocker.MagicMock(side_effect=cancel_during_run)
 
         # Запускаем генератор и ожидаем исключение
         generator = mock_parser.run_parsing()
@@ -908,23 +1011,18 @@ class TestRunParsing:
 
         # Все товары дубликаты
         mock_parser.manager.check_existing_items_with_pages.return_value = {"123": 1}
-
-        # Текущая страница больше максимальной в БД - зацикливание
-        mock_parser.current_page = 5
-        mock_parser.manager.get_last_page_number.return_value = 3
         mock_parser._smart_sleep = mocker.MagicMock()
 
-        # Запускаем генератор
-        generator = mock_parser.run_parsing()
+        # Прогон всегда стартует со страницы 1, поэтому зацикливание
+        # моделируем через БД: максимум в базе — 3, значит парсер дойдёт
+        # до 4-й страницы и там решит, что каталог закольцован.
+        mock_parser.manager.get_last_page_number.return_value = 3
 
-        # Должен завершиться из-за зацикливания
-        try:
-            next(generator)
-        except StopIteration:
-            pass
+        # Запускаем генератор и полностью вычитываем его
+        list(mock_parser.run_parsing())
 
-        # Страница не должна увеличиться
-        assert mock_parser.current_page == 5
+        # Остановились на странице, следующей за максимумом в БД
+        assert mock_parser.current_page == 4
 
     def test_run_parsing_broken_url_handling(self, mock_parser, mocker):
         """6. Сценарий обработки битого URL товара."""
