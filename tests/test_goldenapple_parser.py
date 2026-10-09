@@ -758,7 +758,7 @@ class TestRemovedItemsReport:
         parser._seen_item_ids = {"1", "3", "4"}
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         text = "\n".join(messages)
         assert "1 шт" in text
@@ -777,7 +777,7 @@ class TestRemovedItemsReport:
         parser._seen_item_ids = {"1"}
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         text = "\n".join(messages)
         assert "КОТОРЫХ БОЛЬШЕ НЕТ В ЭТОМ РАЗДЕЛЕ" in text
@@ -794,7 +794,7 @@ class TestRemovedItemsReport:
         parser.manager.count_items.return_value = 5
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         text = "\n".join(messages)
         assert "В разделе найдено за прогон: 3" in text
@@ -805,7 +805,7 @@ class TestRemovedItemsReport:
         parser._seen_item_ids = {"1", "2"}
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         text = "\n".join(messages)
         assert "сохранено новых товаров: 12" in text
@@ -816,7 +816,7 @@ class TestRemovedItemsReport:
         parser._seen_item_ids = {"1", "2"}
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         text = "\n".join(messages)
         assert "не обнаружено" in text
@@ -828,7 +828,7 @@ class TestRemovedItemsReport:
         parser._seen_item_ids = {"1"}
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         assert "наличие: 0" in "\n".join(messages)
 
@@ -840,7 +840,7 @@ class TestRemovedItemsReport:
         ]
 
         messages = []
-        parser._report_full_catalog(messages.append, 4)
+        parser._report_full_catalog(messages.append)
 
         text = "\n".join(messages)
         assert "и ещё 10" in text
