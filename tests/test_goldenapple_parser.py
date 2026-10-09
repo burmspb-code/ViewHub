@@ -477,6 +477,229 @@ class TestRunParsingResetsState:
         assert seen_pages == [1, 1]
 
 
+class TestRepeatedPageDetection:
+    """
+    Отличает антибот-заглушку от честного конца каталога.
+
+    При антиботе любой запрос возвращает первую страницу. Раньше это доходило
+    до проверки current_page > max_page_in_db и давало «зацикливание пагинации»
+    после десятков бесполезных загрузок — либо, при небольшой базе, сразу.
+    """
+
+    @pytest.fixture
+    def mock_parser(self, mocker):
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        parser.current_page = 1
+        return parser
+
+    PAGE_ONE: ClassVar[list] = ["10", "20", "30"]
+
+    def test_fingerprint_ignores_item_order(self, mock_parser):
+        """Порядок карточек при рендере меняется — слепок не должен от этого зависеть."""
+        first = mock_parser._page_fingerprint(["30", "10", "20"])
+        second = mock_parser._page_fingerprint(["10", "20", "30"])
+
+        assert first == second
+
+    def test_fingerprint_tracked_on_every_page(self, mock_parser):
+        """
+        Счётчик ведётся по всем страницам, включая давшие новинки.
+
+        При антиботе с пустой базой первая страница настоящая и состоит из
+        новых товаров. Если бы счётчик считался только в ветке дубликатов,
+        повтор обнаружился бы на третьей загрузке вместо второй.
+        """
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        assert mock_parser._same_page_streak == 1
+
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        assert mock_parser._same_page_streak == 2
+
+    def test_different_pages_reset_streak(self, mock_parser):
+        """Настоящий каталог со своими страницами счётчик не наращивает."""
+        for page in (["10", "20"], ["30", "40"], ["50", "60"]):
+            mock_parser._track_page_fingerprint(page)
+            assert mock_parser._same_page_streak == 1
+
+    def test_repeat_of_first_page_reports_antibot(self, mock_parser):
+        """Повтор слепка ПЕРВОЙ страницы — вердикт «защита от роботов»."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser.current_page = 12
+
+        reason = mock_parser._repeated_page_reason()
+
+        assert "защита от роботов" in reason
+        assert "residential-прокси" in reason
+        # Номер, который сервер отдаёт вместо запрошенного, попадает в текст
+        assert "12" in reason
+
+    def test_repeat_of_other_page_reports_catalog_shrink(self, mock_parser):
+        """Повтор не первой страницы — каталог перестал расти, а не антибот."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)  # страница 1
+        mock_parser._track_page_fingerprint(["90", "91"])  # страница 2 — другая
+        mock_parser._track_page_fingerprint(["90", "91"])  # повтор
+        mock_parser.current_page = 31
+
+        reason = mock_parser._repeated_page_reason()
+
+        assert "защита от роботов" not in reason
+        assert "стало меньше" in reason
+
+    def test_streak_resets_after_different_page(self, mock_parser):
+        """Прерванная серия повторов не тянется через разные страницы."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(["90"])  # серия прервалась
+
+        assert mock_parser._same_page_streak == 1
+
+    def test_first_page_remembered_even_after_progress(self, mock_parser):
+        """Слепок первой страницы запоминается и не перезаписывается."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        for page in ("90", "91", "92", "93"):
+            mock_parser._track_page_fingerprint([page])
+
+        assert mock_parser._first_page_fingerprint == mock_parser._page_fingerprint(self.PAGE_ONE)
+
+
+class TestRepeatedPageIntegration:
+    """
+    Проверка остановки в полном цикле, а не только по счётчику.
+
+    Порядок проверок в ветке полных дубликатов существен: при маленькой базе
+    сравнение «номер больше максимума» срабатывает раньше проверки повтора и
+    объявило бы конец каталога там, где на самом деле антибот.
+    """
+
+    @staticmethod
+    def _build(mocker, tmp_path, db_pages, site_pages, antibot):
+        cfg = GoldenAppleConfig()
+        cfg.target_url = "https://goldapple.ru"
+        cfg.keyword = "/x"
+
+        site_ids = [[f"p{pg}-{s}" for s in ("a", "b")] for pg in range(1, site_pages + 1)]
+        mgr = DatabaseManager(db_path=tmp_path / "t.db")
+        mgr.init_for_config(cfg)
+
+        for pg in range(1, db_pages + 1):
+            for item_id in site_ids[min(pg, site_pages) - 1]:
+                mgr.save([{"item_id": item_id, "name": "x", "page_number": pg}])
+
+        parser = GoldenAppleParser(config=cfg, extractor=GoldenAppleExtractor(cfg), manager=mgr)
+        gui = []
+        parser.progress_callback = gui.append
+        parser._smart_sleep = lambda s: None
+
+        requested = []
+        counter = {"n": 0}
+
+        def catalog_for(page_no):
+            requested.append(page_no)
+            ids = site_ids[0] if antibot else site_ids[min(page_no, site_pages) - 1]
+            counter["n"] += 1
+            html = "<html>" + "".join(
+                f'<article><div storage-scroll-id="{i}"></div>'
+                f'<a href="https://goldapple.ru/p/{i}/"></a>'
+                f'<div class="_ga-price">100</div></article>'
+                for i in ids
+            )
+            page = mocker.MagicMock()
+            page.content.return_value = html
+            page.wait_for_load_state.return_value = None
+            return page
+
+        fpw = mocker.MagicMock()
+        context = mocker.MagicMock()
+        context.new_page.side_effect = lambda: counter.setdefault("page", mocker.MagicMock()) or context.new_page()
+        fpw.chromium.launch_persistent_context.return_value = context
+
+        class PW:
+            def __enter__(self):
+                return fpw
+
+            def __exit__(self, *a):
+                return False
+
+        mocker.patch("src.parsers.golden_apple_parser.sync_playwright", return_value=PW())
+        parser.load_catalog_page = lambda page, url: catalog_for(parser.current_page)
+
+        return parser, mgr, gui, requested, site_ids
+
+    @staticmethod
+    def _run(parser, gui, requested):
+        try:
+            list(parser.run_parsing())
+        except ExceptionStopParser:
+            pass
+        return next((m for m in gui if m.startswith(("🏁", "🛑"))), "")
+
+    def test_antibot_stops_after_two_loads(self, mocker, tmp_path):
+        """Антибот: две загрузки вместо десятков, и вердикт про блокировку."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 30, 35, antibot=True)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert len(requested) == 2
+        assert "защита от роботов" in verdict
+        assert "residential-прокси" in verdict
+
+    def test_antibot_with_single_page_in_db(self, mocker, tmp_path):
+        """Маленькая база: сравнение номеров не должно опережать проверку повтора."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 1, 5, antibot=True)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert len(requested) == 2
+        assert "защита от роботов" in verdict
+
+    def test_antibot_with_empty_db_keeps_first_page(self, mocker, tmp_path):
+        """
+        Пустая база: первая настоящая страница успешно собирается.
+
+        Обманка начинается со второй загрузки, поэтому счётчик обязан считать
+        и страницы, давшие новые товары.
+        """
+        parser, mgr, gui, requested, site_ids = self._build(mocker, tmp_path, 0, 5, antibot=True)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert len(requested) == 2
+        # Товары первой страницы попали в базу
+        present = mgr.check_existing_items_with_pages(site_ids[0])
+        assert set(present) == set(site_ids[0])
+        assert "защита от роботов" in verdict
+
+    def test_normal_end_of_catalog_reports_completion(self, mocker, tmp_path):
+        """Честный конец каталога: сообщение об отработке, а не о сокращении."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 3, 3, antibot=False)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert "Отработан весь каталог" in verdict
+        assert "стало меньше" not in verdict
+
+    def test_normal_collects_remaining_pages(self, mocker, tmp_path):
+        """Нормальный случай: новинки со страниц 3-5 собраны, каталог отработан."""
+        parser, mgr, gui, requested, site_ids = self._build(mocker, tmp_path, 2, 5, antibot=False)
+
+        verdict = self._run(parser, gui, requested)
+
+        for page in site_ids[2:]:
+            assert set(page) <= set(mgr.check_existing_items_with_pages(page))
+        assert "Отработан весь каталог" in verdict
+
+    def test_shrunk_catalog_reports_mismatch(self, mocker, tmp_path):
+        """Каталог сократился: номера не совпадают, новинок всё равно нет."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 4, 2, antibot=False)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert "стало меньше" in verdict
+        assert "защита от роботов" not in verdict
+
+
 class TestStablePageContent:
     """Тесты устойчивого чтения HTML в условиях гонки с навигацией SPA."""
 
@@ -1004,21 +1227,23 @@ class TestRunParsing:
 
         mock_parser.load_catalog_page = mocker.MagicMock(return_value=mock_page)
         mock_parser.count_and_get_products_on_page = mocker.MagicMock(return_value=[mocker.MagicMock()])
-
-        mock_parser.extractor.extract_data.return_value = [
-            {"item_id": "123", "brand": "Brand1", "name": "Product1", "url": "https://goldapple.ru/123"}
-        ]
-
-        # Все товары дубликаты
-        mock_parser.manager.check_existing_items_with_pages.return_value = {"123": 1}
         mock_parser._smart_sleep = mocker.MagicMock()
 
-        # Прогон всегда стартует со страницы 1, поэтому зацикливание
-        # моделируем через БД: максимум в базе — 3, значит парсер дойдёт
-        # до 4-й страницы и там решит, что каталог закольцован.
+        # Честный конец каталога: на каждой странице свой набор артикулов,
+        # и все они уже собраны. Именно этот случай раньше описывался
+        # как «зацикливание пагинации».
+        def page_items(current_page):
+            item_id = f"item-page-{current_page}"
+            return [
+                {"item_id": item_id, "brand": "Brand1", "name": "Product1", "url": f"https://goldapple.ru/{item_id}"}
+            ]
+
+        mock_parser.extractor.extract_data.side_effect = lambda cards: page_items(mock_parser.current_page)
+        mock_parser.manager.check_existing_items_with_pages.side_effect = lambda ids: {i: 1 for i in ids}
+
+        # В базе 3 страницы — парсер дойдёт до 4-й и там честно остановится
         mock_parser.manager.get_last_page_number.return_value = 3
 
-        # Запускаем генератор и полностью вычитываем его
         list(mock_parser.run_parsing())
 
         # Остановились на странице, следующей за максимумом в БД

@@ -36,6 +36,14 @@ UNKNOWN_ERROR_MSG = "Unknown error"
 # остальные позиции остаются в logs/viewhub.log.
 MAX_SKIPPED_REPORT_LINES = 15
 
+# Сколько страниц подряд должны вернуть ОДИНАКОВЫЙ набор товаров, чтобы
+# парсер признал это обманкой, а не концом каталога.
+#
+# Единица означала бы слишком строгое поведение: сайт может один раз
+# отдать ту же страницу из-за кэша или редиректа, и парсер остановился бы
+# на ровном месте. Две подряд — уже систематическое поведение.
+REPEATED_PAGE_LIMIT = 2
+
 # Playwright выбрасывает эту ошибку, когда во время вычисления
 # document.documentElement.outerHTML страница начинает новую навигацию и
 # execution context уничтожается. Золотое Яблоко — SPA, который после
@@ -97,6 +105,15 @@ class GoldenAppleParser(BaseParser):
         # невозможно отличить от пустого описания на сайте. Этот словарь
         # отделяет одно от другого и показывается пользователю в конце прогона.
         self._skipped_rows: List[Dict[str, Any]] = []
+
+        # Слепок предыдущей страницы каталога и число страниц подряд с тем же
+        # набором товаров. Нужны, чтобы отличить конец каталога от ситуации,
+        # когда сервер отдаёт одну и ту же страницу вместо запрошенной.
+        self._last_page_fingerprint: Optional[tuple] = None
+        self._same_page_streak: int = 0
+        # Слепок ПЕРВОЙ страницы раздела: по нему определяется, что повторяется
+        # именно начало каталога — типичный признак антибот-заглушки.
+        self._first_page_fingerprint: Optional[tuple] = None
 
         # Активный режим отрисовки фиксируем ЗДЕСЬ, а не только в run_parsing().
         # Раньше режим выводился в лог исключительно из run_parsing(), а это
@@ -255,6 +272,60 @@ class GoldenAppleParser(BaseParser):
                 "page_number": self.current_page,
                 "reason": reason,
             }
+        )
+
+    def _page_fingerprint(self, item_ids: List[str]) -> tuple:
+        """
+        Слепок страницы каталога: отсортированный кортеж артикулов.
+
+        Порядок отображения карточек меняется при каждом рендере SPA, поэтому
+        сравнивать его бессмысленно — два одинаковых набора в разном порядке
+        дали бы ложное «страницы разные». Цены тоже не берутся: они могут
+        обновиться между двумя загрузками одной и той же страницы.
+
+        Артикулы же неизменны: это бизнес-ключ товара.
+        """
+        return tuple(sorted(item_ids))
+
+    def _track_page_fingerprint(self, item_ids: List[str]) -> None:
+        """
+        Обновляет слепок текущей страницы и счётчик подряд идущих повторов.
+
+        Счётчик считается по ВСЕМ страницам, включая те, что дали новые товары:
+        при антиботе первая страница настоящая, а обманка начинается со второй,
+        и без общего счёта мы бы пропустили самый частый случай — пустую базу.
+        """
+        fingerprint = self._page_fingerprint(item_ids)
+
+        if fingerprint == self._last_page_fingerprint:
+            self._same_page_streak += 1
+        else:
+            self._same_page_streak = 1
+            self._last_page_fingerprint = fingerprint
+
+        if self._first_page_fingerprint is None:
+            self._first_page_fingerprint = fingerprint
+
+    def _repeated_page_reason(self) -> str:
+        """
+        Текст причины остановки, когда сервер отдаёт одну и ту же страницу.
+
+        Отличие от проверки в _track_page_fingerprint — смотрим не только на сам
+        факт повтора, но и на то, какая именно страница повторилась:
+        так антибот-заглушка отличается от сокращения каталога.
+        """
+        if self._last_page_fingerprint == self._first_page_fingerprint:
+            return (
+                f"Сайт {self._same_page_streak} раз подряд вернул одну и ту же страницу "
+                f"(на запрос №{self.current_page} отдаёт страницу №1). Скорее всего, "
+                f"сработала защита от роботов: нужен другой IP-адрес или residential-прокси."
+            )
+
+        return (
+            f"Сайт {self._same_page_streak} раз подряд вернул одну и ту же страницу. "
+            f"Парсер остановился на странице №{self.current_page}: номера страниц на сайте "
+            f"перестали соответствовать запрошенным. Возможно, товаров на сайте стало меньше, "
+            f"чем собрано ранее."
         )
 
     def _describe_load_failure(self, error: Exception) -> str:
@@ -664,6 +735,9 @@ class GoldenAppleParser(BaseParser):
         self.current_page = 1
         self.empty_pages_count = 0
         self._skipped_rows.clear()
+        self._last_page_fingerprint = None
+        self._same_page_streak = 0
+        self._first_page_fingerprint = None
 
         to_gui("=== ЗАПУСК СКРЫТОГО КОНВЕЙЕРА ПАРСИНГА ===")
 
@@ -907,6 +981,12 @@ class GoldenAppleParser(BaseParser):
                     # Обнуляем счетчик пустых страниц
                     self.empty_pages_count = 0
 
+                    # Слепок страницы считаем ВСЕГДА, до запроса к БД. Само
+                    # сравнение делается ниже, в ветке полных дубликатов: там
+                    # уже известно, что страница не дала ничего нового, и можно
+                    # отличить антибот-заглушку от честного конца каталога.
+                    self._track_page_fingerprint(item_id_list)
+
                     # Делаем ОДИН запрос к БД и получаем словарь {id: page_number}
                     db_items_pages = self.manager.check_existing_items_with_pages(item_id_list)
 
@@ -929,13 +1009,40 @@ class GoldenAppleParser(BaseParser):
 
                     # Если на странице все товары уже есть в БД завершаем цикл
                     if len(item_id_list) == old_duplicates_count:
-                        # --- Проверка на зацикливание парсинга ---
-                        # Получаем максимальный номер страницы из БД
                         max_page_in_db = self.manager.get_last_page_number()
+                        repeated = self._same_page_streak >= REPEATED_PAGE_LIMIT
 
-                        # Если текущий номер больше максимального - ЗАЦИКЛИВАНИЕ
+                        # ПОРЯДОК ПРОВЕРОК ЗДЕСЬ СУЩЕСТВЕН.
+                        #
+                        # 1. Повтор слепка ПЕРВОЙ страницы — всегда обманка.
+                        #    Сервер отдаёт начало каталога вместо запрошенной
+                        #    страницы, и никакое сравнение номеров это не поймает.
+                        #    Особенно важно при небольшой базе: если в базе всего
+                        #    одна страница, проверка «номер больше максимума»
+                        #    сработала бы раньше и объявила конец каталога, хотя
+                        #    на сайте их пять.
+                        if repeated and self._last_page_fingerprint == self._first_page_fingerprint:
+                            to_gui(f"🛑 {self._repeated_page_reason()}")
+                            logger.warning("Остановка парсинга: %s", self._repeated_page_reason())
+                            break
+
+                        # 2. Мы обошли все страницы, записанные в базу, и на
+                        #    каждой не нашли ничего нового. Повтор страницы здесь
+                        #    означает, что запрошенной страницы просто не
+                        #    существует — каталог закончился штатно.
                         if self.current_page > max_page_in_db:
-                            to_gui("🏁 Зацикливание пагинации. Остановка. Все товары сохранены.")
+                            to_gui(
+                                f"🏁 Отработан весь каталог: страницы до №{max_page_in_db} "
+                                f"проверены, новых товаров больше нет."
+                            )
+                            break
+
+                        # 3. Повтор не первой страницы, и мы ещё не вышли за
+                        #    пределы базы. Значит номера страниц на сайте не
+                        #    совпадают с запрошенными — каталог сократился.
+                        if repeated:
+                            to_gui(f"🛑 {self._repeated_page_reason()}")
+                            logger.warning("Остановка парсинга: %s", self._repeated_page_reason())
                             break
 
                         self.current_page += 1
