@@ -117,7 +117,7 @@ def create_db_viewer(db_path: str, table_name: str, obj) -> QWidget:
         return widget
 
     except Exception as e:
-        logger.error(f"Ошибка при создании viewer: {e}")
+        logger.exception("Ошибка при создании viewer: %s", e)
         if hasattr(obj, "result_display"):
             obj.result_display.append(f"❌ Ошибка при создании viewer: {e}")
         return None

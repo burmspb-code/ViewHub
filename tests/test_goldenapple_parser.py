@@ -1,8 +1,18 @@
 import os
+import sys
+
+from pathlib import Path
+from typing import ClassVar
+
 import pytest
 
 
-from src.parsers.golden_apple_parser import GoldenAppleParser
+from src.parsers.golden_apple_parser import (
+    MAX_PAGES_PAST_DB,
+    MAX_SKIPPED_REPORT_LINES,
+    PROCESS_CANCELLED_MSG,
+    GoldenAppleParser,
+)
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.database.sqlite_manager import DatabaseManager
@@ -27,8 +37,10 @@ def test_init_goldenapple_parser(monkeypatch):
     assert parser.current_page == 1
     assert parser.empty_pages_count == 0
 
-    expected = os.path.join(fake_path, "chrome_user_profile")
-    assert parser.user_data_dir == expected
+    # Ожидаемый путь собираем через Path, иначе тест падает на Windows:
+    # в fake_path прямые слэши, а str(Path(...)) возвращает обратные.
+    expected = str(Path(fake_path) / "chrome_user_profile")
+    assert Path(parser.user_data_dir) == Path(expected)
 
 
 def test_build_url_with_pagination(monkeypatch):
@@ -116,7 +128,7 @@ class TestGoldenAppleParserSleepAndLoad:
         with pytest.raises(ExceptionStopParser) as exc_info:
             mock_parser._smart_sleep(5.0)  # Задаем аж 5 секунд сна
 
-        assert "Процесс отменен пользователем во время паузы." in str(exc_info.value)
+        assert "Процесс отменен пользователем" in str(exc_info.value)
 
 
 class TestLoadCatalogPage:
@@ -158,8 +170,10 @@ class TestLoadCatalogPage:
 
     def test_load_catalog_inner_timeout_ignored(self, mock_parser, mocker):
         """2. Сценарий сбоя article: если карточки не ответили, код скроллит дальше."""
-        # Перехватываем логгер, чтобы проверить debug-запись
+        # Перехватываем логгер, чтобы проверить запись о проблеме
         mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
+        # Ожидание челленджа здесь не проверяется — отключаем, чтобы тест был быстрым
+        mocker.patch.object(mock_parser, "_wait_for_challenge_to_pass", return_value=False)
 
         mock_page = mocker.MagicMock()
 
@@ -169,9 +183,17 @@ class TestLoadCatalogPage:
         # Вызываем метод (он не должен упасть благодаря внутреннему try/except)
         result = mock_parser.load_catalog_page(page=mock_page, url="https://goldapple.ru")
 
-        # Проверяем, что логгер зафиксировал отладочную информацию
-        mock_logger.debug.assert_called_once()
-        assert "Загрузка тегов для товара не отвечает: Timeout 60000ms expired" in mock_logger.debug.call_args[0][0]
+        # Проверяем, что проблема зафиксирована на уровне warning.
+        # Раньше здесь стоял logger.debug, из-за чего главная проблема
+        # (каталог не отрендерился) была полностью невидима в логах.
+        assert mock_logger.warning.call_count >= 1
+        # Разворачиваем %s-аргументы, иначе в тексте останутся плейсхолдеры
+        logged = " ".join(
+            (str(call.args[0]) % call.args[1:]) if len(call.args) > 1 else str(call.args[0])
+            for call in mock_logger.warning.call_args_list
+        )
+        assert "не появились на странице каталога" in logged
+        assert "Timeout 60000ms expired" in logged
 
         # Важно: скролл и сны ВСЁ РАВНО должны отработать
         mock_page.evaluate.assert_called_once_with("window.scrollTo(0, 2500);")
@@ -211,8 +233,865 @@ class TestLoadCatalogPage:
         assert "Fatal Error" in str(exc_info.value)
 
         # Проверяем логирование: текст должен взять только первую строчку ошибки и номер страницы
-        mock_logger.error.assert_called_once()
-        assert "Ошибка. Не удалось прогрузить страницу каталога №5: Fatal Error" in mock_logger.error.call_args[0][0]
+        # Вызывается logger.exception, а не logger.error. На настоящем
+        # логгере exception внутри вызывает error, но на MagicMock это
+        # разные атрибуты, поэтому проверять нужно именно exception.
+        mock_logger.exception.assert_called_once()
+        template, page_number = mock_logger.exception.call_args[0]
+        assert template % page_number == "Ошибка. Не удалось прогрузить страницу каталога №5"
+
+
+class TestSkippedAccounting:
+    """Учёт товаров, у которых не снялись детальные характеристики."""
+
+    @pytest.fixture
+    def mock_parser(self, mocker):
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        parser.current_page = 3
+        return parser
+
+    ITEM: ClassVar[dict] = {
+        "item_id": "99000037750",
+        "url": "https://goldapple.ru/catalog/parfjumerija/chanel-99000037750/",
+        "brand": "Chanel",
+        "name": "Coco Mademoiselle",
+    }
+
+    def test_failed_load_returns_none_and_logs_reason(self, mock_parser, mocker):
+        """
+        Неудачная загрузка возвращает None и пишет в лог короткую причину.
+
+        Регистрацию в учёте делает вызывающий код цикла: load_product_detail_page
+        отвечает только за открытие вкладки, а решение «считать товар
+        незаполненным» принимается там, где известен результат.
+        """
+        mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
+        mock_parser._smart_sleep = mocker.MagicMock()
+
+        context = mocker.MagicMock()
+        context.new_page.return_value.locator.return_value.first.wait_for.side_effect = Exception(
+            "Timeout 60000ms exceeded."
+        )
+        mock_parser._last_document_status = 503
+
+        result = mock_parser.load_product_detail_page(context, self.ITEM["url"], self.ITEM["item_id"])
+
+        assert result is None
+        assert mock_logger.warning.called
+
+        _template, item_id, reason = mock_logger.warning.call_args[0]
+        assert item_id == "99000037750"
+        # Причина короткая и с HTTP-статусом, а не многострочный трейлбек
+        assert "таймаут" in reason
+        assert "HTTP 503" in reason
+
+    def test_failed_load_logs_no_traceback(self, mock_parser, mocker):
+        """Трейлбек Playwright не нужен: это штатный таймаут, а не авария."""
+        mock_logger = mocker.patch("src.parsers.golden_apple_parser.logger")
+        mock_parser._smart_sleep = mocker.MagicMock()
+
+        context = mocker.MagicMock()
+        context.new_page.return_value.locator.return_value.first.wait_for.side_effect = Exception(
+            "Timeout 60000ms exceeded."
+        )
+
+        mock_parser.load_product_detail_page(context, self.ITEM["url"], self.ITEM["item_id"])
+
+        assert not mock_logger.exception.called
+
+    def test_describe_failure_detects_timeout_and_status(self, mock_parser):
+        """Ошибка Playwright превращается в короткую причину с HTTP-статусом."""
+        mock_parser._last_document_status = 429
+
+        reason = mock_parser._describe_load_failure(Exception("Timeout 60000ms exceeded."))
+
+        assert "таймаут" in reason
+        assert "HTTP 429" in reason
+
+    def test_describe_failure_keeps_unknown_error_text(self, mock_parser):
+        """Неизвестная ошибка не теряется: берётся первая строка."""
+        mock_parser._last_document_status = None
+
+        reason = mock_parser._describe_load_failure(Exception("Fatal\nSecond line"))
+
+        assert reason == "Fatal"
+
+    def test_register_skipped_captures_item_and_page(self, mock_parser):
+        """В учёт попадают артикул, ссылка и номер страницы каталога."""
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        row = mock_parser._skipped_rows[0]
+        assert row["item_id"] == "99000037750"
+        assert row["url"].endswith("99000037750/")
+        assert row["brand"] == "Chanel"
+        assert row["page_number"] == 3
+
+    def test_successful_extraction_is_not_registered(self, mock_parser):
+        """
+        Товар, с которого характеристики снялись, в учёт НЕ попадает.
+
+        Это главное свойство учёта: иначе в список незаполненных попадали бы
+        товары, у которых сайт просто не публикует описание.
+        """
+        assert mock_parser._skipped_rows == []
+
+    def test_flush_reports_list_to_user(self, mock_parser):
+        """Пользователь получает список с артикулом, ссылкой и причиной."""
+        messages = []
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        mock_parser._flush_skipped(messages.append)
+
+        text = "\n".join(messages)
+        assert "99000037750" in text
+        assert "Chanel" in text
+        assert self.ITEM["url"] in text
+        assert "карточка не загрузилась" in text
+
+    def test_flush_does_not_touch_database(self, mocker):
+        """Таблицы учёта в базе нет: flush ничего в БД не пишет."""
+        from src.database.sqlite_manager import DatabaseManager
+
+        real_manager = DatabaseManager()
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=real_manager)
+        parser.current_page = 1
+        parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        parser._flush_skipped(lambda m: None)
+
+        # У менеджера вообще нет методов работы с учётом сбоев.
+        assert not hasattr(real_manager, "save_skipped")
+        assert not hasattr(real_manager, "skipped_table_name")
+
+    def test_flush_without_failures_does_nothing(self, mock_parser):
+        """Пустой список не засоряет интерфейс."""
+        messages = []
+        mock_parser._flush_skipped(messages.append)
+
+        assert messages == []
+
+    def test_flush_caps_long_list(self, mock_parser):
+        """Длинный список обрезается, иначе панель вывода утонет в строках."""
+        messages = []
+        for n in range(MAX_SKIPPED_REPORT_LINES + 20):
+            mock_parser._register_skipped({**self.ITEM, "item_id": str(n)}, "карточка не загрузилась")
+
+        mock_parser._flush_skipped(messages.append)
+
+        text = "\n".join(messages)
+        assert "35 шт" in text
+        assert "и ещё 20" in text
+        # В панели вывода только первые позиции, полный список — в файле лога
+        assert text.count("карточка не загрузилась") == MAX_SKIPPED_REPORT_LINES
+
+    def test_flush_clears_list_after_report(self, mock_parser):
+        """
+        После отчёта список очищается.
+
+        Отчёт — сигнал к решению «перезапускать или нет», а не архив.
+        Следующий прогон всё равно начнётся с первой страницы и пройдёт по тем
+        же товарам заново, копить незачем.
+        """
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+
+        mock_parser._flush_skipped(lambda m: None)
+
+        assert mock_parser._skipped_rows == []
+
+    def test_flush_deduplicates_by_item_id(self, mock_parser):
+        """
+        Один товар, упавший на двух страницах, показывается один раз.
+
+        При перетусовке каталога прямо во время обхода товар может встретиться
+        повторно с другим номером страницы — без дедупликации отчёт врёт.
+        """
+        mock_parser._register_skipped(self.ITEM, "карточка не загрузилась")
+        mock_parser._register_skipped({**self.ITEM, "page_number": 9}, "карточка не загрузилась")
+
+        messages = []
+        mock_parser._flush_skipped(messages.append)
+
+        text = "\n".join(messages)
+        assert "1 шт" in text
+        # Один товар — одна строка с маркером, даже если встречался дважды
+        assert text.count("   • ") == 1
+        # Номер страницы остаётся от первого попадания, а не от второго
+        assert "99000037750 — Chanel" in text
+
+
+class TestRunParsingResetsState:
+    """
+    Состояние прогона обнуляется в начале run_parsing().
+
+    Объект парсера переиспользуется между нажатиями «НАЧАТЬ», поэтому раньше
+    второй запуск с другой ссылкой продолжал со страницы, на которой остановился
+    предыдущий, и сразу выдавал ложное «зацикливание пагинации».
+    """
+
+    def test_state_reset_before_browser_starts(self, mocker):
+        """Счётчики и флаг отмены сбрасываются до первой загрузки страницы."""
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._smart_sleep = lambda s: None
+
+        # Состояние, оставшееся от «предыдущего» прогона
+        parser.current_page = 26
+        parser.empty_pages_count = 1
+        parser._is_running = False
+        parser._register_skipped({"item_id": "1", "url": "u"}, "старый сбой")
+
+        mock_pw = mocker.patch("src.parsers.golden_apple_parser.sync_playwright")
+        mock_pw.return_value.__enter__.return_value = mocker.MagicMock()
+
+        # Запускаем генератор: тело выполняется до первой загрузки страницы.
+        # Останавливаемся тут, чтобы не уходить в реальный Playwright.
+        mocker.patch.object(parser, "load_catalog_page", side_effect=ExceptionStopParser("стоп"))
+
+        try:
+            next(parser.run_parsing(), None)
+        except ExceptionStopParser:
+            pass
+
+        assert parser.current_page == 1
+        assert parser.empty_pages_count == 0
+        assert parser._is_running is True
+        assert parser._skipped_rows == []
+
+    def test_second_run_starts_from_first_page(self, mocker):
+        """Два прогона подряд — оба начинают с первой страницы."""
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._smart_sleep = lambda s: None
+
+        seen_pages = []
+        mocker.patch.object(parser, "load_catalog_page", side_effect=ExceptionStopParser("стоп"))
+
+        mock_pw = mocker.patch("src.parsers.golden_apple_parser.sync_playwright")
+        mock_pw.return_value.__enter__.return_value = mocker.MagicMock()
+
+        for _ in range(2):
+            try:
+                next(parser.run_parsing(), None)
+            except ExceptionStopParser:
+                pass
+            seen_pages.append(parser.current_page)
+
+        assert seen_pages == [1, 1]
+
+
+class TestRepeatedPageDetection:
+    """
+    Отличает антибот-заглушку от честного конца каталога.
+
+    При антиботе любой запрос возвращает первую страницу. Раньше это доходило
+    до проверки current_page > max_page_in_db и давало «зацикливание пагинации»
+    после десятков бесполезных загрузок — либо, при небольшой базе, сразу.
+    """
+
+    @pytest.fixture
+    def mock_parser(self, mocker):
+        parser = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        parser.current_page = 1
+        return parser
+
+    PAGE_ONE: ClassVar[list] = ["10", "20", "30"]
+
+    def test_fingerprint_ignores_item_order(self, mock_parser):
+        """Порядок карточек при рендере меняется — слепок не должен от этого зависеть."""
+        first = mock_parser._page_fingerprint(["30", "10", "20"])
+        second = mock_parser._page_fingerprint(["10", "20", "30"])
+
+        assert first == second
+
+    def test_fingerprint_tracked_on_every_page(self, mock_parser):
+        """
+        Счётчик ведётся по всем страницам, включая давшие новинки.
+
+        При антиботе с пустой базой первая страница настоящая и состоит из
+        новых товаров. Если бы счётчик считался только в ветке дубликатов,
+        повтор обнаружился бы на третьей загрузке вместо второй.
+        """
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        assert mock_parser._same_page_streak == 1
+
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        assert mock_parser._same_page_streak == 2
+
+    def test_different_pages_reset_streak(self, mock_parser):
+        """Настоящий каталог со своими страницами счётчик не наращивает."""
+        for page in (["10", "20"], ["30", "40"], ["50", "60"]):
+            mock_parser._track_page_fingerprint(page)
+            assert mock_parser._same_page_streak == 1
+
+    def test_repeat_of_first_page_reports_antibot(self, mock_parser):
+        """Повтор слепка ПЕРВОЙ страницы — вердикт «защита от роботов»."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser.current_page = 12
+
+        reason = mock_parser._repeated_page_reason()
+
+        assert "защита от роботов" in reason
+        assert "residential-прокси" in reason
+        # Номер, который сервер отдаёт вместо запрошенного, попадает в текст
+        assert "12" in reason
+
+    def test_repeat_inside_db_reports_both_causes(self, mock_parser):
+        """
+        Повтор не первой страницы внутри границ базы — причина неоднозначна.
+
+        Запрошенная страница по идее существует, но сервер её не отдал. Это
+        одинаково выглядит и при блокировке, и при сокращении каталога, поэтому
+        сообщение называет оба варианта и честно признаёт: отчёт о исчезнувших
+        товарах недостоверен.
+        """
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)  # страница 1
+        mock_parser._track_page_fingerprint(["90", "91"])  # страница 2 — другая
+        mock_parser._track_page_fingerprint(["90", "91"])  # повтор
+        mock_parser.current_page = 3
+
+        reason = mock_parser._repeated_page_reason(past_db=False)
+
+        assert "защита от роботов" in reason
+        assert "сократился" in reason
+        assert "обход неполный" in reason
+
+    def test_repeat_past_db_reports_mismatch(self, mock_parser):
+        """Тот же повтор, но уже за границей базы — тут нужен другой текст."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(["90", "91"])
+        mock_parser._track_page_fingerprint(["90", "91"])
+        mock_parser.current_page = 31
+
+        reason = mock_parser._repeated_page_reason(past_db=True)
+
+        assert "не совпадают" in reason
+        assert "сократился" in reason
+
+    def test_streak_resets_after_different_page(self, mock_parser):
+        """Прерванная серия повторов не тянется через разные страницы."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        mock_parser._track_page_fingerprint(["90"])  # серия прервалась
+
+        assert mock_parser._same_page_streak == 1
+
+    def test_first_page_remembered_even_after_progress(self, mock_parser):
+        """Слепок первой страницы запоминается и не перезаписывается."""
+        mock_parser._track_page_fingerprint(self.PAGE_ONE)
+        for page in ("90", "91", "92", "93"):
+            mock_parser._track_page_fingerprint([page])
+
+        assert mock_parser._first_page_fingerprint == mock_parser._page_fingerprint(self.PAGE_ONE)
+
+
+class TestRepeatedPageIntegration:
+    """
+    Проверка остановки в полном цикле, а не только по счётчику.
+
+    Порядок проверок в ветке полных дубликатов существен: при маленькой базе
+    сравнение «номер больше максимума» срабатывает раньше проверки повтора и
+    объявило бы конец каталога там, где на самом деле антибот.
+    """
+
+    @staticmethod
+    def _build(mocker, tmp_path, db_pages, site_pages, antibot):
+        cfg = GoldenAppleConfig()
+        cfg.target_url = "https://goldapple.ru"
+        cfg.keyword = "/x"
+
+        site_ids = [[f"p{pg}-{s}" for s in ("a", "b")] for pg in range(1, site_pages + 1)]
+        mgr = DatabaseManager(db_path=tmp_path / "t.db")
+        mgr.init_for_config(cfg)
+
+        for pg in range(1, db_pages + 1):
+            for item_id in site_ids[min(pg, site_pages) - 1]:
+                mgr.save([{"item_id": item_id, "name": "x", "page_number": pg}])
+
+        parser = GoldenAppleParser(config=cfg, extractor=GoldenAppleExtractor(cfg), manager=mgr)
+        gui = []
+        parser.progress_callback = gui.append
+        parser._smart_sleep = lambda s: None
+
+        requested = []
+        counter = {"n": 0}
+
+        def catalog_for(page_no):
+            requested.append(page_no)
+            ids = site_ids[0] if antibot else site_ids[min(page_no, site_pages) - 1]
+            counter["n"] += 1
+            html = "<html>" + "".join(
+                f'<article><div storage-scroll-id="{i}"></div>'
+                f'<a href="https://goldapple.ru/p/{i}/"></a>'
+                f'<div class="_ga-price">100</div></article>'
+                for i in ids
+            )
+            page = mocker.MagicMock()
+            page.content.return_value = html
+            page.wait_for_load_state.return_value = None
+            return page
+
+        fpw = mocker.MagicMock()
+        context = mocker.MagicMock()
+        context.new_page.side_effect = lambda: counter.setdefault("page", mocker.MagicMock()) or context.new_page()
+        fpw.chromium.launch_persistent_context.return_value = context
+
+        class PW:
+            def __enter__(self):
+                return fpw
+
+            def __exit__(self, *a):
+                return False
+
+        mocker.patch("src.parsers.golden_apple_parser.sync_playwright", return_value=PW())
+        parser.load_catalog_page = lambda page, url: catalog_for(parser.current_page)
+
+        return parser, mgr, gui, requested, site_ids
+
+    @staticmethod
+    def _run(parser, gui, requested):
+        try:
+            list(parser.run_parsing())
+        except ExceptionStopParser:
+            pass
+        return next((m for m in gui if m.startswith(("🏁", "🛑"))), "")
+
+    def test_antibot_stops_after_two_loads(self, mocker, tmp_path):
+        """Антибот: две загрузки вместо десятков, и вердикт про блокировку."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 30, 35, antibot=True)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert len(requested) == 2
+        assert "защита от роботов" in verdict
+        assert "residential-прокси" in verdict
+
+    def test_antibot_with_single_page_in_db(self, mocker, tmp_path):
+        """Маленькая база: сравнение номеров не должно опережать проверку повтора."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 1, 5, antibot=True)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert len(requested) == 2
+        assert "защита от роботов" in verdict
+
+    def test_antibot_with_empty_db_keeps_first_page(self, mocker, tmp_path):
+        """
+        Пустая база: первая настоящая страница успешно собирается.
+
+        Обманка начинается со второй загрузки, поэтому счётчик обязан считать
+        и страницы, давшие новые товары.
+        """
+        parser, mgr, gui, requested, site_ids = self._build(mocker, tmp_path, 0, 5, antibot=True)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert len(requested) == 2
+        # Товары первой страницы попали в базу
+        present = mgr.check_existing_items_with_pages(site_ids[0])
+        assert set(present) == set(site_ids[0])
+        assert "защита от роботов" in verdict
+
+    def test_normal_end_of_catalog_reports_completion(self, mocker, tmp_path):
+        """Честный конец каталога: сообщение об отработке, а не о сокращении."""
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 3, 3, antibot=False)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert "Каталог полностью обработан" in verdict
+        assert "стало меньше" not in verdict
+        assert "защита от роботов" not in verdict
+
+    def test_normal_collects_remaining_pages(self, mocker, tmp_path):
+        """Нормальный случай: новинки со страниц 3-5 собраны, каталог отработан."""
+        parser, mgr, gui, requested, site_ids = self._build(mocker, tmp_path, 2, 5, antibot=False)
+
+        verdict = self._run(parser, gui, requested)
+
+        for page in site_ids[2:]:
+            assert set(page) <= set(mgr.check_existing_items_with_pages(page))
+        assert "Каталог полностью обработан" in verdict
+
+    def test_shrunk_catalog_does_not_report_removed(self, mocker, tmp_path):
+        """
+        Сокращение каталога не должно давать отчёт об удалённых товарах.
+
+        В базе 4 страницы, на сайте 2. Парсер останавливается на третьей
+        странице, потому что сервер отдаёт вторую. Страницы 3-4 в базе мы не
+        видели, но это не значит, что их товары исчезли — их просто некуда было
+        посмотреть. Отчёт в этом случае недостоверен и не показывается.
+        """
+        parser, _mgr, gui, requested, _ = self._build(mocker, tmp_path, 4, 2, antibot=False)
+
+        verdict = self._run(parser, gui, requested)
+
+        assert "Каталог полностью обработан" not in verdict
+        assert "РАНЕЕ СОБРАННЫХ" not in verdict
+        # Причина названа, обе версии указаны
+        assert "сократился" in verdict
+        assert "обход неполный" in verdict
+
+
+class TestRemovedItemsReport:
+    """
+    Отчёт о товарах, исчезнувших с сайта.
+
+    Показывается ТОЛЬКО при полностью пройденном каталоге. При отмене или
+    блокировке часть страниц не открывалась, и их товары были бы объявлены
+    удалёнными ошибочно.
+    """
+
+    @pytest.fixture
+    def parser(self, mocker):
+        p = GoldenAppleParser(config=mocker.MagicMock(), extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        p.current_page = 5
+        p._saved_count = 12
+        p.manager.get_items_for_removal_check.return_value = [
+            ("1", {"brand": "Chanel", "name": "A", "url": "https://u/1", "page_number": 1, "in_stock": 1}),
+            ("2", {"brand": "Dior", "name": "B", "url": "https://u/2", "page_number": 2, "in_stock": 0}),
+        ]
+        p.manager.count_items.return_value = 2
+        return p
+
+    def test_reports_only_missing_items(self, parser):
+        """В отчёт попадают лишь те товары, которых не было на страницах."""
+        parser._seen_item_ids = {"1", "3", "4"}
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        text = "\n".join(messages)
+        assert "1 шт" in text
+        assert "Dior" in text
+        # Товар, который на сайте есть, в списке отсутствует
+        assert "Chanel" not in text
+
+    def test_report_mentions_section_not_site(self, parser):
+        """
+        Формулировка говорит про раздел, а не про сайт.
+
+        Проверено на живых данных: товар, отсутствующий в разделе новинок,
+        оказался перенесён в другой раздел и по ссылке открывается. Формулировка
+        «на сайте больше нет» вводила бы в заблуждение проверяющего.
+        """
+        parser._seen_item_ids = {"1"}
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        text = "\n".join(messages)
+        assert "КОТОРЫХ БОЛЬШЕ НЕТ В ЭТОМ РАЗДЕЛЕ" in text
+        assert "перенесены в другой раздел" in text
+        assert "на сайте их убрали" not in text
+
+    def test_report_shows_found_and_total(self, parser):
+        """В отчёте видно, сколько нашли в разделе и сколько лежит в базе."""
+        parser._seen_item_ids = {"1", "2", "3"}
+        parser.manager.get_items_for_removal_check.return_value = [
+            ("1", {"brand": "A", "name": "X", "url": "u", "page_number": 1, "in_stock": 1}),
+            ("2", {"brand": "B", "name": "Y", "url": "u", "page_number": 1, "in_stock": 1}),
+        ]
+        parser.manager.count_items.return_value = 5
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        text = "\n".join(messages)
+        assert "В разделе найдено за прогон: 3" in text
+        assert "Всего в базе: 5" in text
+
+    def test_reports_new_count_and_total(self, parser):
+        """В отчёте фигурируют оба числа: добавлено за прогон и всего в базе."""
+        parser._seen_item_ids = {"1", "2"}
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        text = "\n".join(messages)
+        assert "сохранено новых товаров: 12" in text
+        assert "Всего в базе: 2" in text
+
+    def test_reports_absence_of_removed(self, parser):
+        """Если ничего не пропало — об этом сказано прямо, без пустого списка."""
+        parser._seen_item_ids = {"1", "2"}
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        text = "\n".join(messages)
+        assert "не обнаружено" in text
+        assert "отсутствующих в этом разделе" in text
+        assert "РАНЕЕ СОБРАННЫХ" not in text
+
+    def test_shows_stock_flag_of_removed_item(self, parser):
+        """Признак наличия выводится: снятый с продажи товар виден как 0."""
+        parser._seen_item_ids = {"1"}
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        assert "наличие: 0" in "\n".join(messages)
+
+    def test_caps_long_removed_list(self, parser):
+        """Длинный список обрезается, полный — в лог."""
+        parser.manager.get_items_for_removal_check.return_value = [
+            (str(n), {"brand": "B", "name": "N", "url": "u", "page_number": 1, "in_stock": 1})
+            for n in range(MAX_SKIPPED_REPORT_LINES + 10)
+        ]
+
+        messages = []
+        parser._report_full_catalog(messages.append)
+
+        text = "\n".join(messages)
+        assert "и ещё 10" in text
+        assert text.count("   • ") == MAX_SKIPPED_REPORT_LINES
+
+    def test_distinct_pages_counter(self, parser):
+        """Обход считается по РАЗЛИЧНЫМ страницам, а не по числу запросов."""
+        parser._track_page_fingerprint(["1", "2"])
+        parser._track_page_fingerprint(["1", "2"])
+        parser._track_page_fingerprint(["3", "4"])
+
+        # Три запроса, но разных страниц две
+        assert parser._distinct_pages_seen() == 2
+
+
+class TestStablePageContent:
+    """Тесты устойчивого чтения HTML в условиях гонки с навигацией SPA."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        config = mocker.MagicMock()
+        parser = GoldenAppleParser(config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        # Убираем паузу между попытками, чтобы тест был быстрым
+        mocker.patch.object(parser, "_smart_sleep", return_value=None)
+        return parser
+
+    RACE_ERROR = "Unable to retrieve content because the page is navigating and changing the content."
+
+    def test_retries_and_succeeds_on_navigation_race(self, parser, mocker):
+        """Гонка с навигацией — не повод падать: повтор должен вернуть HTML."""
+        page = mocker.MagicMock()
+        page.content.side_effect = [Exception(self.RACE_ERROR), Exception(self.RACE_ERROR), "<html>ok</html>"]
+
+        assert parser._stable_page_content(page) == "<html>ok</html>"
+        assert page.content.call_count == 3
+
+    def test_no_retry_on_unrelated_error(self, parser, mocker):
+        """Настоящая ошибка не должна маскироваться бессмысленными повторами."""
+        page = mocker.MagicMock()
+        page.content.side_effect = Exception("net::ERR_CONNECTION_REFUSED")
+
+        with pytest.raises(Exception) as exc_info:
+            parser._stable_page_content(page)
+
+        assert "net::ERR_CONNECTION_REFUSED" in str(exc_info.value)
+        # Ровно одна попытка — повтор тут не поможет
+        assert page.content.call_count == 1
+
+    def test_raises_after_exhausting_attempts(self, parser, mocker):
+        """Если гонка не проходит, выбрасываем внятную ошибку, а не голую Playwright."""
+        page = mocker.MagicMock()
+        page.content.side_effect = Exception(self.RACE_ERROR)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            parser._stable_page_content(page, attempts=3)
+
+        assert "3 попыток" in str(exc_info.value)
+        assert page.content.call_count == 3
+
+    def test_respects_user_cancel(self, parser, mocker):
+        """Отмена пользователем должна срабатывать и на повторах."""
+        page = mocker.MagicMock()
+        page.content.side_effect = Exception(self.RACE_ERROR)
+        parser._is_running = False
+
+        with pytest.raises(ExceptionStopParser):
+            parser._stable_page_content(page)
+
+
+class TestHeadlessMode:
+    """Тесты режима отрисовки. Настройка задаётся только константой."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        from src.parsers_config.golden_apple_config import GoldenAppleConfig
+
+        return GoldenAppleParser(
+            config=GoldenAppleConfig, extractor=mocker.MagicMock(), manager=mocker.MagicMock()
+        )
+
+    def test_headless_is_the_default(self, parser):
+        """По умолчанию парсер работает без отрисовки страниц."""
+        assert parser._resolve_headless() is True
+
+    def test_ignores_legacy_env_var(self, parser, monkeypatch):
+        """
+        Переменная окружения больше не влияет на режим.
+
+        Раньше ею переключали режим без пересборки — нужно было при отладке.
+        Теперь настройка живёт в константе конфигурации.
+        """
+        monkeypatch.setenv("GOLDAPPLE_HEADLESS", "0")
+        assert parser._resolve_headless() is True
+
+    def test_config_constant_is_used(self, parser, mocker):
+        """Значение берётся из конфигурации парсера, а не из кода напрямую."""
+        from src.parsers_config.golden_apple_config import GoldenAppleConfig
+
+        mocker.patch.object(GoldenAppleConfig, "DEFAULT_HEADLESS", False)
+        assert parser._resolve_headless() is False
+
+
+class TestBlockDetection:
+    """Тесты определения блокировки и устойчивости к навигации при скролле."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        config = mocker.MagicMock()
+        parser = GoldenAppleParser(config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        parser.current_page = 1
+        mocker.patch.object(parser, "_smart_sleep", return_value=None)
+        return parser
+
+    @pytest.mark.parametrize("status", [401, 403, 429])
+    def test_detects_http_block(self, parser, status):
+        """HTTP 401/403/429 однозначно говорят о блокировке запроса."""
+        parser._last_document_status = status
+        reason = parser._detect_block_reason()
+        assert reason is not None
+        assert str(status) in reason
+
+    def test_detects_network_failure(self, parser):
+        """Нет ответа при наличии неудачных запросов = проблема с сетью."""
+        parser._last_document_status = None
+        parser._failed_requests = ["document https://goldapple.ru/ :: net::ERR_NAME_NOT_RESOLVED"]
+        reason = parser._detect_block_reason()
+        assert reason is not None
+        assert "ERR_NAME_NOT_RESOLVED" in reason
+
+    def test_no_false_positives_on_normal_status(self, parser):
+        """Успешный ответ 200 не должен считаться блокировкой."""
+        parser._last_document_status = 200
+        parser._failed_requests = []
+        assert parser._detect_block_reason() is None
+
+    def test_scroll_failure_does_not_break_page_load(self, parser, mocker):
+        """
+        Ошибка скролла не должна обрывать парсинг.
+
+        Именно так выглядел прошлый сбой: страница была занята навигацией,
+        page.evaluate() падал с 'Execution context was destroyed' и обрывал
+        весь запуск, хотя потеря скролла не критична.
+        """
+        mock_page = mocker.MagicMock()
+        mock_page.goto.return_value = None
+        mock_page.wait_for_load_state.return_value = None
+        # Карточки не появляются — но блокировки не зафиксировано
+        mock_page.locator.return_value.first.wait_for.side_effect = Exception("Timeout 60000ms exceeded")
+        mock_page.evaluate.side_effect = Exception(
+            "Execution context was destroyed, most likely because of a navigation"
+        )
+        parser._last_document_status = 200
+        # Челлендж тут не проверяется — отключаем ожидание
+        mocker.patch.object(parser, "_wait_for_challenge_to_pass", return_value=False)
+
+        result = parser.load_catalog_page(page=mock_page, url="https://goldapple.ru/parfjumerija/novinki")
+
+        # Страница возвращена несмотря на упавший скролл
+        assert result == mock_page
+
+    def test_block_raises_clear_stop_message(self, parser, mocker):
+        """При явной блокировке парсер должен остановиться с понятным текстом."""
+        mock_page = mocker.MagicMock()
+        mock_page.goto.return_value = None
+        mock_page.wait_for_load_state.return_value = None
+        mock_page.locator.return_value.first.wait_for.side_effect = Exception("Timeout 60000ms exceeded")
+        mock_page.title.return_value = ""
+        mock_page.inner_text.return_value = ""
+        parser._last_document_status = 403
+        # Челлендж не проходит — проверяем именно сообщение о блокировке
+        mocker.patch.object(parser, "_wait_for_challenge_to_pass", return_value=False)
+
+        with pytest.raises(ExceptionStopParser) as exc_info:
+            parser.load_catalog_page(page=mock_page, url="https://goldapple.ru/parfjumerija/novinki")
+
+        assert "403" in str(exc_info.value)
+        # Скролл не должен был выполняться — до него не дошли
+        mock_page.evaluate.assert_not_called()
+
+
+class TestChallengeWait:
+    """Тесты ожидания прохождения антибот-челленджа."""
+
+    @pytest.fixture
+    def parser(self, mocker):
+        config = mocker.MagicMock()
+        parser = GoldenAppleParser(config=config, extractor=mocker.MagicMock(), manager=mocker.MagicMock())
+        parser._is_running = True
+        return parser
+
+    def test_returns_true_when_articles_appear(self, parser, mocker):
+        """Если карточки появились — проверка пройдена, ждать дальше не нужно."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 12
+        page.title.return_value = "Золотое Яблоко — Парфюмерия"
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=2000) is True
+
+    def test_tolerates_unreadable_title(self, parser, mocker):
+        """Заголовок может не читаться во время навигации — это не повод падать."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.side_effect = [
+            Exception("Execution context was destroyed"),
+            Exception("Execution context was destroyed"),
+            5,  # на третьей итерации карточки появились
+        ]
+        page.title.side_effect = Exception("cannot read title during navigation")
+
+        mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=5000) is True
+
+    def test_still_waiting_when_title_changes_to_checking_device(self, parser, mocker):
+        """
+        Регрессия из лога: title='Gold Apple — checking device'.
+
+        Это всё ещё проверка, а не каталог. Раньше любая смена заголовка
+        считалась успехом, поэтому парсер рапортовал «проверка пройдена»
+        и тратил по 60 секунд на каждую страницу. Теперь успех — только
+        появление карточек <article>.
+        """
+        page = mocker.MagicMock()
+        # Карточек нет — проверка не пройдена
+        page.locator.return_value.count.return_value = 0
+        page.title.side_effect = ["Loading https://goldapple.ru/parfjumerija", "Gold Apple — checking device"]
+
+        mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=50) is False
+
+    def test_returns_false_on_timeout(self, parser, mocker):
+        """Если проверка так и не завершилась — возвращаем False, а не вечный цикл."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 0
+        page.title.return_value = "Loading https://goldapple.ru/parfjumerija"
+
+        mocker.patch.object(parser, "_smart_sleep", side_effect=lambda s: None)
+
+        assert parser._wait_for_challenge_to_pass(page, timeout_ms=50) is False
+
+    def test_respects_cancel(self, parser, mocker):
+        """Отмена должна прерывать и ожидание проверки."""
+        page = mocker.MagicMock()
+        page.locator.return_value.count.return_value = 0
+        page.title.return_value = "Loading https://goldapple.ru"
+        parser._is_running = False
+
+        with pytest.raises(ExceptionStopParser):
+            parser._wait_for_challenge_to_pass(page, timeout_ms=5000)
 
 
 class TestCountAndGetProductsOnPage:
@@ -285,8 +1164,8 @@ class TestCountAndGetProductsOnPage:
         assert "Target page closed" in str(exc_info.value)
 
         # Проверяем, что логгер зафиксировал правильный номер страницы текущего парсера (№4)
-        log_message = mock_logger.error.call_args[0][0]
-        assert "Ошибка. Не удалось определить количество товаров на странице №4" in log_message
+        template, page_number = mock_logger.exception.call_args[0]
+        assert template % page_number == "Ошибка. Не удалось определить количество товаров на странице №4"
 
 
 class TestRunParsing:
@@ -294,9 +1173,42 @@ class TestRunParsing:
 
     @pytest.fixture(autouse=True)
     def mock_stealth(self, mocker):
-        """Автоматически мокаем playwright_stealth для всех тестов класса."""
+        """
+        Мокаем playwright_stealth для всех тестов класса.
+
+        Мокается именно Stealth().apply_stealth_sync(), потому что в
+        playwright_stealth 2.x функции stealth_sync больше нет. Если бы
+        оставшийся код импортировал несуществующее имя, тесты бы это поймали.
+        """
         mock_stealth_module = mocker.MagicMock()
         mocker.patch.dict("sys.modules", {"playwright_stealth": mock_stealth_module})
+        return mock_stealth_module
+
+    def test_stealth_uses_v2_api(self, mocker):
+        """
+        Проверяет, что вызывается актуальный API playwright_stealth 2.x.
+
+        Регрессия: код делал `from playwright_stealth import stealth_sync`,
+        чего в 2.x нет вообще. Ошибка глоталась try/except, и маскировка
+        не работала нигде — ни при запуске из исходников, ни в сборке.
+        """
+        # autouse-фикстура подменяет sys.modules, поэтому реальный пакет нужно
+        # импортировать ДО подмены — снимаем фикстуру через прямой sys.modules.
+        import importlib
+
+        saved = sys.modules.pop("playwright_stealth", None)
+        try:
+            real_stealth = importlib.import_module("playwright_stealth")
+
+            # Экспортируется класс Stealth, а функции stealth_sync в 2.x нет
+            assert hasattr(real_stealth, "Stealth")
+            assert not hasattr(real_stealth, "stealth_sync")
+
+            # Нужный метод есть у реального класса
+            assert hasattr(real_stealth.Stealth, "apply_stealth_sync")
+        finally:
+            if saved is not None:
+                sys.modules["playwright_stealth"] = saved
 
     @pytest.fixture
     def mock_parser(self, mocker):
@@ -403,9 +1315,16 @@ class TestRunParsing:
         mock_p.chromium.launch_persistent_context.return_value = mock_context
         mock_context.new_page.return_value = mock_page
 
-        # Имитируем отмену при первой проверке
-        mock_parser._is_running = False
         mock_parser._smart_sleep = mocker.MagicMock()
+
+        # Имитируем отмену ПОСЛЕ запуска прогона: раньше отмена выставлялась
+        # до run_parsing(), но теперь он сбрасывает флаг на старте, поэтому
+        # реальная отмена приходит уже во время работы.
+        def cancel_during_run(*args, **kwargs):
+            mock_parser._is_running = False
+            raise ExceptionStopParser(PROCESS_CANCELLED_MSG)
+
+        mock_parser.load_catalog_page = mocker.MagicMock(side_effect=cancel_during_run)
 
         # Запускаем генератор и ожидаем исключение
         generator = mock_parser.run_parsing()
@@ -451,8 +1370,15 @@ class TestRunParsing:
         # Проверяем, что страница увеличилась для проверки следующей
         assert mock_parser.current_page == 2
 
-    def test_run_parsing_pagination_loop_detection(self, mock_parser, mocker):
-        """5. Сценарий обнаружения зацикливания пагинации."""
+    def test_run_parsing_exhausts_reserve_past_db(self, mock_parser, mocker):
+        """
+        Граница базы пройдена — парсер идёт дальше до исчерпания запаса.
+
+        Раньше он останавливался сразу за пределами базы, из-за чего отчёт о
+        товарах, исчезнувших с сайта, был недостоверен. Теперь он честно
+        проходит ещё MAX_PAGES_PAST_DB страниц: если каталог вырос, конец
+        найдётся; если вырос сильно — сообщит, что не дотянул.
+        """
         mock_playwright = mocker.patch("src.parsers.golden_apple_parser.sync_playwright")
 
         mock_p = mocker.MagicMock()
@@ -464,30 +1390,27 @@ class TestRunParsing:
 
         mock_parser.load_catalog_page = mocker.MagicMock(return_value=mock_page)
         mock_parser.count_and_get_products_on_page = mocker.MagicMock(return_value=[mocker.MagicMock()])
-
-        mock_parser.extractor.extract_data.return_value = [
-            {"item_id": "123", "brand": "Brand1", "name": "Product1", "url": "https://goldapple.ru/123"}
-        ]
-
-        # Все товары дубликаты
-        mock_parser.manager.check_existing_items_with_pages.return_value = {"123": 1}
-
-        # Текущая страница больше максимальной в БД - зацикливание
-        mock_parser.current_page = 5
-        mock_parser.manager.get_last_page_number.return_value = 3
         mock_parser._smart_sleep = mocker.MagicMock()
 
-        # Запускаем генератор
-        generator = mock_parser.run_parsing()
+        # Каждая страница отдаёт свой набор — повторов нет
+        def page_items(current_page):
+            item_id = f"item-page-{current_page}"
+            return [
+                {"item_id": item_id, "brand": "Brand1", "name": "Product1", "url": f"https://goldapple.ru/{item_id}"}
+            ]
 
-        # Должен завершиться из-за зацикливания
-        try:
-            next(generator)
-        except StopIteration:
-            pass
+        mock_parser.extractor.extract_data.side_effect = lambda cards: page_items(mock_parser.current_page)
+        mock_parser.manager.check_existing_items_with_pages.side_effect = lambda ids: {i: 1 for i in ids}
 
-        # Страница не должна увеличиться
-        assert mock_parser.current_page == 5
+        # В базе 3 страницы: пройдено 3 + запас из MAX_PAGES_PAST_DB
+        mock_parser.manager.get_last_page_number.return_value = 3
+
+        list(mock_parser.run_parsing())
+
+        # Пройдено: 3 страницы базы + запас. current_page не увеличивается
+        # после break, поэтому указывает на последнюю открытую страницу.
+        assert mock_parser.current_page == 3 + MAX_PAGES_PAST_DB
+        assert mock_parser._pages_past_db == MAX_PAGES_PAST_DB
 
     def test_run_parsing_broken_url_handling(self, mock_parser, mocker):
         """6. Сценарий обработки битого URL товара."""
