@@ -230,7 +230,7 @@ pw-browsers/
 *.db-wal
 
 # Personal notes for the project defence (not part of the handover)
-docs/defense-notes.md
+docs/defense-*.md
 
 # Local helper scripts for voice notes, not part of the application
 transcribe.py
