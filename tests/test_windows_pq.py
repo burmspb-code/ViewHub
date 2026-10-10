@@ -275,6 +275,40 @@ class TestParsingPageGuard:
         assert main_window.manager is not None
         assert main_window.stack.currentIndex() == 4
 
+    def test_close_event_survives_deleted_thread(self, main_window, mocker):
+        """Закрытие окна после удалённого потока не должно падать.
+
+        QThread удаляется через deleteLater, но атрибут продолжает
+        ссылаться на оболочку удалённого объекта C++. Обращение
+        к нему бросает RuntimeError, который раньше уходил в
+        критическую ошибку приложения.
+        """
+        deleted = mocker.MagicMock()
+        deleted.isRunning.side_effect = RuntimeError("wrapped C/C++ object of type QThread has been deleted")
+        main_window.parser_thread = deleted
+
+        event = mocker.MagicMock()
+        main_window.closeEvent(event)
+
+        assert event.accept.called
+        assert main_window.parser_thread is None
+
+    def test_thread_is_alive_returns_false_on_deleted(self, main_window, mocker):
+        """Проверка живости потока переживает удалённый объект."""
+        deleted = mocker.MagicMock()
+        deleted.isRunning.side_effect = RuntimeError("deleted")
+        main_window.parser_thread = deleted
+
+        assert main_window._thread_is_alive() is False
+        assert main_window.parser_thread is None
+
+    def test_thread_is_alive_without_attribute(self, main_window):
+        """Без атрибута parser_thread поток считается незапущенным."""
+        if hasattr(main_window, "parser_thread"):
+            del main_window.parser_thread
+
+        assert main_window._thread_is_alive() is False
+
     def test_close_event_stops_running_thread(self, main_window, mocker):
         """Закрытие окна во время парсинга останавливает поток."""
         worker = mocker.MagicMock()

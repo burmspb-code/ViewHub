@@ -538,7 +538,7 @@ class MainWindow(QWidget):
         # писать в ту же базу, а его воркер и лог окажутся заменены — отменять
         # и читать журнал было бы уже нечего. Кнопка «НАЧАТЬ» и так заблокирована
         # на время прогона, здесь нужно только не создавать дубль.
-        if hasattr(self, "parser_thread") and self.parser_thread.isRunning():
+        if self._thread_is_alive():
             self.stack.setCurrentIndex(4)
             # append, а не setText: панель вывода жива, в ней идёт прогресс.
             self.result_display.append(
@@ -569,6 +569,24 @@ class MainWindow(QWidget):
                 f"⚠️ Внимание\n❌ {e!s}\n\nПожалуйста, устраните проблему и нажмите кнопку 'Парсинг' еще раз."
             )
 
+    def _thread_is_alive(self) -> bool:
+        """Жив ли поток парсинга, с учётом того, что он мог быть удалён.
+
+        После завершения прогона QThread удаляется через deleteLater,
+        но атрибут self.parser_thread продолжает ссылаться на оболочку
+        удалённого объекта C++. Обращение к такому объекту бросает
+        RuntimeError, поэтому проверять isRunning на него нельзя.
+        """
+        thread = getattr(self, "parser_thread", None)
+        if thread is None:
+            return False
+        try:
+            return bool(thread.isRunning())
+        except RuntimeError:
+            # Объект C++ уже удалён: поток завершён, осталась только ссылка.
+            self.parser_thread = None
+            return False
+
     def closeEvent(self, event):
         """
         Корректно закрывает окно во время работающего парсинга.
@@ -576,7 +594,7 @@ class MainWindow(QWidget):
         Без этого Qt уничтожает живой QThread и приложение падает с
         «QThread: Destroyed while thread is still running».
         """
-        if hasattr(self, "parser_thread") and self.parser_thread.isRunning():
+        if self._thread_is_alive():
             logger.info("Закрытие окна во время парсинга: останавливаем поток.")
 
             with suppress(Exception):
