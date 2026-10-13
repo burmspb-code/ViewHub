@@ -1,7 +1,19 @@
 import logging
+
+from contextlib import suppress
+from copy import copy
 from logging import Logger
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
+
+from src.core.paths import app_root, ensure_writable
+
+# Ограничение размера файлового лога. На сервере лог не должен расти
+# бесконечно: при долгой работе он способен занять весь диск.
+LOG_MAX_BYTES = 2 * 1024 * 1024  # 2 МБ на текущий файл
+LOG_BACKUP_COUNT = 3  # плюс три предыдущие версии
 
 # Отключаем DEBUG и INFO спам от сетевых библиотек и asyncio глобально
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -52,29 +64,114 @@ class QTextEditHandler(logging.Handler):
         self.widget.ensureCursorVisible()
 
     def emit(self, record):
-        if self.widget:
-            msg = self.format(record)
-            self.signals.append_log.emit(msg)
+        if not self.widget:
+            return
+
+        # В панель журнала уходит только текст сообщения, без трейлбека.
+        # Полный трейлбек при этом остаётся в файловом логе: на сервере
+        # разбирать инцидент приходится именно по logs/viewhub.log, а в GUI
+        # достаточно строки о том, какой товар не удалось загрузить.
+        #
+        # Запись копируется перед изменением: объект LogRecord общий для всех
+        # обработчиков, и его exc_text использует файловый логгер.
+        if record.exc_info or record.exc_text:
+            record = copy(record)
+            record.exc_info = None
+            record.exc_text = None
+
+        msg = self.format(record)
+        self.signals.append_log.emit(msg)
+
+
+def _resolve_log_dir() -> Path:
+    """
+    Каталог для файловых логов рядом с приложением.
+
+    Если рядом с бинарником писать нельзя (read-only каталог на сервере),
+    используем временный каталог, иначе логирование падало бы на старте.
+    """
+    return ensure_writable(app_root() / "logs")
+
+
+def reset_log_file() -> bool:
+    """
+    Удаляет файловый лог вместе с ротациями.
+
+    Вызывается в начале каждой сессии парсинга, поэтому лог всегда
+    описывает только текущий запуск, а не историю предыдущих.
+
+    Файл удаляется целиком, а не обрезается: обработчик открыт с
+    delay=True и пересоздаст файл при первой же записи.
+
+    Возвращает True, если лог был удалён.
+    """
+    root_logger = logging.getLogger("")
+    removed = False
+
+    for handler in root_logger.handlers:
+        if not isinstance(handler, RotatingFileHandler):
+            continue
+
+        base_name = handler.baseFilename
+        handler.close()
+
+        candidates = [base_name]
+        candidates.extend(f"{base_name}.{index}" for index in range(1, LOG_BACKUP_COUNT + 1))
+
+        for candidate in candidates:
+            with suppress(OSError):
+                Path(candidate).unlink()
+                removed = True
+
+        # Обработчик остаётся подключённым: delay=True заставит его создать
+        # новый файл при следующей записи.
+        handler.stream = None
+
+    return removed
 
 
 def setup_logger(name: str = "", level: int = logging.INFO) -> Logger:
-    """Инициализирует базовые параметры логгера."""
+    """
+    Инициализирует базовые параметры логгера.
+
+    Для корневого логгера (name == "") дополнительно создаётся файловый
+    обработчик. Раньше файловых логов не было вовсе, поэтому в собранном
+    приложении падение парсера было невозможно диагностировать: всё уходило
+    только в QTextEdit, а исключение внутри QThread не доходит до sys.excepthook.
+    """
     logger = logging.getLogger(name)
     logger.setLevel(level)
+
+    # Файловый обработчик добавляем только для корневого логгера и только один раз.
+    if name == "" and not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+        file_handler = RotatingFileHandler(
+            str(_resolve_log_dir() / "viewhub.log"),
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+            delay=True,
+        )
+        file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        logger.addHandler(file_handler)
+
     return logger
 
 
 def register_gui_handler(log_display_widget, level: int = logging.INFO):
     """
-    Безопасно находит корневой логгер, очищает старые хэндлеры
-    и жестко привязывает графическое окно.
+    Безопасно находит корневой логгер и жестко привязывает графическое окно.
+
+    Удаляется ТОЛЬКО предыдущий QTextEditHandler. Раньше здесь вызывался
+    handlers.clear(), который удалял и файловый обработчик — из-за чего
+    логи в файл не попадали ни при каких настройках.
     """
     root_logger = logging.getLogger("")
     root_logger.setLevel(level)
 
-    # Очищаем только старые хэндлеры, чтобы не было дублей
-    if root_logger.handlers:
-        root_logger.handlers.clear()
+    # Убираем только старые GUI-обработчики, файловый логгер сохраняем.
+    for handler in root_logger.handlers:
+        if isinstance(handler, QTextEditHandler):
+            root_logger.removeHandler(handler)
 
     # Создаем и добавляем наш QTextEditHandler
     qt_handler = QTextEditHandler(log_display_widget)

@@ -223,3 +223,21 @@ chrome_user_profile/**
 # Qodo
 .qodo/
 
+pw-browsers/
+
+# SQLite temporary files
+*.db-shm
+*.db-wal
+
+# Personal notes for the project defence (not part of the handover)
+docs/defense-*.md
+
+# Local helper scripts for voice notes, not part of the application
+transcribe.py
+record.py
+download_model.py
+last.py
+
+# Voice recordings
+recordings/
+*.bat

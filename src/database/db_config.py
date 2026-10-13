@@ -1,7 +1,8 @@
-import sys
 import os
 from pathlib import Path
 from typing import Optional
+
+from src.core.paths import app_root
 
 
 class DBParsingConfig:
@@ -22,13 +23,8 @@ class DBParsingConfig:
         3. Путь по умолчанию: storage/viewhub_parsing.db
         """
         # 1. Определяем корень там, откуда ЗАПУЩЕНА программа
-        if getattr(sys, "frozen", False):
-            # Если запущен скомпилированный .exe, берем папку, где лежит этот .exe
-            root_dir = Path(sys.executable).resolve().parent
-        else:
-            # Если запускаем main.py из корня проекта, то текущая рабочая директория (CWD)
-            # и есть корень нашего проекта.
-            root_dir = Path.cwd()
+        # Скомпилированный .exe -> папка рядом с ним; main.py -> корень проекта (CWD).
+        root_dir = app_root()
 
         # 2. Явный аргумент
         if custom_path:

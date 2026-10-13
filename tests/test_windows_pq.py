@@ -223,6 +223,109 @@ class TestInitialState:
         assert main_window.log_display.isReadOnly()
 
 
+class TestParsingPageGuard:
+    """
+    Защита от создания второго парсера поверх работающего.
+
+    Пользователь может уйти в меню во время парсинга и вернуться. Новый
+    парсер поверх живого создал бы два потока, пишущих в одну базу, а лог и
+    кнопка «ОТМЕНИТЬ» достались бы новому объекту — старый стал бы
+    неуправляемым.
+    """
+
+    def test_no_parser_created_while_thread_running(self, main_window, mocker):
+        """При живом потоке парсер не пересоздаётся."""
+        mock_prepare = mocker.patch("src.windows_pq.prepare_parsing")
+
+        thread = mocker.MagicMock()
+        thread.isRunning.return_value = True
+        main_window.parser_thread = thread
+        original_parser = main_window.parser
+
+        main_window.show_parsing_page()
+
+        # Пользователь попал на страницу парсинга
+        assert main_window.stack.currentIndex() == 4
+        # Новый парсер не создавался, старый объект на месте
+        assert not mock_prepare.called
+        assert main_window.parser is original_parser
+
+    def test_guard_uses_append_not_settext(self, main_window, mocker):
+        """Прогресс парсинга в панели вывода не затирается."""
+        mocker.patch("src.windows_pq.prepare_parsing")
+        main_window.result_display.setText("загрузка страницы 7")
+        main_window.parser_thread = mocker.MagicMock()
+        main_window.parser_thread.isRunning.return_value = True
+
+        main_window.show_parsing_page()
+
+        assert "загрузка страницы 7" in main_window.result_display.toPlainText()
+
+    def test_parser_created_when_thread_idle(self, main_window, mocker):
+        """Если поток не работает — парсер создаётся как обычно."""
+        thread = mocker.MagicMock()
+        thread.isRunning.return_value = False
+        main_window.parser_thread = thread
+        main_window.parser = None
+
+        main_window.show_parsing_page()
+
+        # Настоящий prepare_parsing отработал, парсер на месте
+        assert main_window.parser is not None
+        assert main_window.manager is not None
+        assert main_window.stack.currentIndex() == 4
+
+    def test_close_event_survives_deleted_thread(self, main_window, mocker):
+        """Закрытие окна после удалённого потока не должно падать.
+
+        QThread удаляется через deleteLater, но атрибут продолжает
+        ссылаться на оболочку удалённого объекта C++. Обращение
+        к нему бросает RuntimeError, который раньше уходил в
+        критическую ошибку приложения.
+        """
+        deleted = mocker.MagicMock()
+        deleted.isRunning.side_effect = RuntimeError("wrapped C/C++ object of type QThread has been deleted")
+        main_window.parser_thread = deleted
+
+        event = mocker.MagicMock()
+        main_window.closeEvent(event)
+
+        assert event.accept.called
+        assert main_window.parser_thread is None
+
+    def test_thread_is_alive_returns_false_on_deleted(self, main_window, mocker):
+        """Проверка живости потока переживает удалённый объект."""
+        deleted = mocker.MagicMock()
+        deleted.isRunning.side_effect = RuntimeError("deleted")
+        main_window.parser_thread = deleted
+
+        assert main_window._thread_is_alive() is False
+        assert main_window.parser_thread is None
+
+    def test_thread_is_alive_without_attribute(self, main_window):
+        """Без атрибута parser_thread поток считается незапущенным."""
+        if hasattr(main_window, "parser_thread"):
+            del main_window.parser_thread
+
+        assert main_window._thread_is_alive() is False
+
+    def test_close_event_stops_running_thread(self, main_window, mocker):
+        """Закрытие окна во время парсинга останавливает поток."""
+        worker = mocker.MagicMock()
+        thread = mocker.MagicMock()
+        thread.isRunning.return_value = True
+        main_window.parser_worker = worker
+        main_window.parser_thread = thread
+
+        event = mocker.MagicMock()
+        main_window.closeEvent(event)
+
+        assert worker.stop.called
+        assert thread.quit.called
+        assert thread.wait.called
+        assert event.accept.called
+
+
 class TestStackWidgetPages:
     """Тесты страниц в стеке виджетов."""
 

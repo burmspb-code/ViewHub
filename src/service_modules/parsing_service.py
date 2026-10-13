@@ -47,8 +47,7 @@ def parsing_on_click(obj) -> None:
         logger.info(f"Инициализация БД. Таблица: {table_name}, файл: {obj.manager.db_path}")
 
     except Exception as e:
-        error_msg = f"❌ Критическая ошибка инициализации базы данных: {e}"
-        logger.error(error_msg, exc_info=True)
+        logger.exception("❌ Критическая ошибка инициализации базы данных: %s", e)
 
         # Освобождаем ресурсы базы данных
         if getattr(obj, "manager", None) is not None:
@@ -126,7 +125,7 @@ def parsing_cancel_on_click(obj) -> None:
     """Обработчик нажатия на кнопку 'ОТМЕНИТЬ' во время парсинга."""
     # Проверяем, запущен ли поток парсера в данный момент
     if hasattr(obj, "parser_thread") and obj.parser_thread.isRunning():
-        logger.info("Запрос на отмену сканирования отправлен пользователем...")
+        logger.info("Запрос на отмену парсинга отправлен пользователем...")
 
         # Выводим красивый статус пользователю в текстовую панель
         if hasattr(obj, "result_display"):
