@@ -7,8 +7,11 @@ from contextlib import suppress
 from PyQt6.QtCore import QThread
 
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
+from src.extractors.gardarika_extractor import GardarikaExtractor
 from src.parsers.golden_apple_parser import GoldenAppleParser
+from src.parsers.gardarika_parser import GardarikaParser
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
+from src.parsers_config.gardarika_config import GardarikaConfig
 from src.database.sqlite_manager import DatabaseManager
 from src.workers.parser_worker import ParserWorker
 
@@ -114,12 +117,20 @@ def parsing_on_click(obj) -> None:
     obj.parser_thread.start()
 
 
-def prepare_parsing(obj) -> None:
-    """Сборка парсера."""
-    config = GoldenAppleConfig()  # Конфиг по умолчанию
+def prepare_parsing_golden_apple(obj) -> None:
+    """Сборка парсера для Золотого яблока."""
+    config = GoldenAppleConfig()
     extractor = GoldenAppleExtractor(config)
     obj.manager = DatabaseManager()
     obj.parser = GoldenAppleParser(config=config, extractor=extractor, manager=obj.manager)
+
+
+def prepare_parsing_gardarika(obj) -> None:
+    """Сборка парсера для Гардарики."""
+    config = GardarikaConfig()
+    extractor = GardarikaExtractor(config)
+    obj.manager = DatabaseManager()
+    obj.parser = GardarikaParser(config=config, extractor=extractor, manager=obj.manager)
 
 
 def parsing_cancel_on_click(obj) -> None:

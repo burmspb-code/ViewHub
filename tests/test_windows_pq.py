@@ -216,7 +216,7 @@ class TestInitialState:
     def test_target_url_readonly(self, main_window):
         """Проверяет, что поле целевого URL только для чтения."""
         assert main_window.target_url_input.isReadOnly()
-        assert main_window.target_url_input.text() == "https://goldapple.ru/"
+        assert main_window.target_url_input.text() == "https://gardarika-spb.ru/"
 
     def test_log_display_readonly(self, main_window):
         """Проверяет, что панель логов только для чтения."""

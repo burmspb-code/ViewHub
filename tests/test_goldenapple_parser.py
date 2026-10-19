@@ -28,7 +28,8 @@ def test_init_goldenapple_parser(monkeypatch):
     assert parser.empty_pages_count == 0
 
     expected = os.path.join(fake_path, "chrome_user_profile")
-    assert parser.user_data_dir == expected
+    # Нормализуем пути для кроссплатформенного сравнения
+    assert os.path.normpath(parser.user_data_dir) == os.path.normpath(expected)
 
 
 def test_build_url_with_pagination(monkeypatch):

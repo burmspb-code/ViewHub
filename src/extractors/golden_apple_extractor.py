@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class GoldenAppleExtractor(BaseExtractor):
-    """Extractor для сайта Цитадель (адаптирован под Золотое Яблоко)."""
+    """Extractor для сайта Золотое Яблоко."""
 
     def __init__(self, config: BaseDBParsingConfig) -> None:
         self.config = config

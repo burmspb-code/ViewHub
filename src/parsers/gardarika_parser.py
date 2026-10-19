@@ -7,18 +7,27 @@ from urllib.parse import urlencode, urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from my_exceptions.exceptions import ExceptionStopParser
+from src.my_exceptions.exceptions import ExceptionStopParser
 from src.core.base_classes import BaseParser
 
 logger = logging.getLogger(__name__)
+
+PARSER_DESCRIPTION = (
+    "-" * 85 + "\n"
+    "Парсер добавляет товары в БД из поисковых ответов сайта.\n"
+    "Введите ключевое слово, например: 'apecs' или 'петля'.\n"
+    "Важно: Если сайт не нашел товаров по такому запросу, то и парсер их не добавит!\n"
+    "Экспорт данных из базы доступен в формате .xlsx или .csv.\n"
+)
 
 
 class GardarikaParser(BaseParser):
     """Парсинг Сайта Гардарики (для страниц без пагинации и скролла)."""
 
-    def __init__(self, *args, **kwargs):
-        """Инициализация парсера с поддержкой сетевой сессии."""
-        super().__init__(*args, **kwargs)
+    def __init__(self, config: BaseDBParsingConfig, extractor: BaseExtractor, manager: DatabaseManager):
+        super().__init__(config, extractor, manager)
+        self.description = PARSER_DESCRIPTION
+
         # Сохраняем сессию для Keep-Alive, единых заголовков и сохранения Cookies
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -43,13 +52,18 @@ class GardarikaParser(BaseParser):
             if response.status_code != 200:
                 raise RuntimeError(f"❌ Сайт вернул статус код: {response.status_code}")
 
-            # Автоматически чиним кодировку для правильного отображения кириллицы
-            response.encoding = response.apparent_encoding
+            # Сайт Гардарики отдаёт контент в cp1251 (windows-1251).
+            # apparent_encoding иногда ошибается, ломая парсинг lxml.
+            # Передаём байты и from_encoding — BeautifulSoup сам декодирует,
+            # заменяя невалидные последовательности, и lxml не падает.
+            response.encoding = "cp1251"
+            html_bytes = response.content
 
-            soup = BeautifulSoup(response.text, "lxml")
+            soup = BeautifulSoup(html_bytes, "lxml", from_encoding="cp1251")
             new_items = self.extractor.extract_data(soup)
 
             if new_items:
+                self.manager.save(new_items) # Записываем в БД
                 yield new_items  # Отдаем пачку воркеру, который сам проверит флаг "Стоп"
             else:
                 raise ExceptionStopParser("По вашему запросу ничего не найдено.")

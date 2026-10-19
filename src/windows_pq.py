@@ -38,7 +38,13 @@ from src.core.styles import (
     PREVIEW_BUTTON_STYLE,
 )
 from src.service_modules.auth_service import auth_on_click, request_on_click
-from src.service_modules.parsing_service import parsing_on_click, parsing_cancel_on_click, prepare_parsing
+from src.service_modules.parsing_service import (
+    parsing_on_click,
+    parsing_cancel_on_click,
+    prepare_parsing_golden_apple,
+    prepare_parsing_gardarika
+)
+
 from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
 from src.service_modules.export_service import parsing_export_on_click
 from src.service_modules.db_viewer_service import parsing_preview_on_click
@@ -347,7 +353,7 @@ class MainWindow(QWidget):
         self.target_url_input = QLineEdit()
         # self.target_url_input.setPlaceholderText("https://target-url")
         # Предустанавливаем значение вместо плейсхолдера
-        self.target_url_input.setText("https://goldapple.ru/")
+        self.target_url_input.setText("https://gardarika-spb.ru/")
         # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
         self.target_url_input.setReadOnly(True)
         self.target_url_input.setFixedHeight(35)
@@ -535,9 +541,9 @@ class MainWindow(QWidget):
         """Открытие меню парсинга."""
         try:
             # Запускаем функцию сборки парсера
-            prepare_parsing(self)
+            prepare_parsing_gardarika(self)
 
-            # ЕСЛИ ВСЁ ОК: только теперь перекидываем пользователя в меню парсинга (индекс 4)
+            # Перекидываем пользователя в меню парсинга (индекс 4)
             self.stack.setCurrentIndex(4)
 
             # Выводим готовое описание парсера на новый экран
