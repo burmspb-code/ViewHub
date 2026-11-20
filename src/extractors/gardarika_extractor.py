@@ -1,18 +1,41 @@
 """Класс извлечения данных из контента сайта Гардарики."""
 
-from typing import Any, Dict, List
+import logging
+import re
 
+from typing import Any, Dict, List
 from bs4 import BeautifulSoup
 
-from my_exceptions.exceptions import ExceptionStopParser
-from src.core.base_classes import BaseConfig, BaseExtractor
+from src.my_exceptions.exceptions import ExceptionStopParser
+from src.core.base_classes import BaseExtractor, BaseDBParsingConfig
+
+logger = logging.getLogger(__name__)
 
 
-class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переименовано в GardarikiExtractor
+class GardarikaExtractor(BaseExtractor):  # Переименовано в GardarikiExtractor
     """Extractor для сайта Гардарики."""
 
-    def __init__(self, config: BaseConfig) -> None:
+    def __init__(self, config: BaseDBParsingConfig) -> None:
         self.config = config
+
+    def _parse_availability(self, text: str) -> int:
+        """Преобразует строку наличия в 1/0."""
+        text_lower = text.lower()
+        # Наличие если написано "Много", "В наличии", есть картинка с title "В наличии" и т.д.
+        if any(kw in text_lower for kw in ("много", "в наличии", "есть", "available", "in stock")):
+            return 1
+        return 0
+
+    def _parse_price(self, text: str) -> float:
+        """Извлекает числовую цену из строки."""
+        # Удаляем всё кроме цифр, точки и запятой
+        cleaned = re.sub(r"[^\d.,]", "", text)
+        # Заменяем запятую на точку
+        cleaned = cleaned.replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return 0.0
 
     def extract_data(self, raw_content: Any) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
@@ -23,14 +46,14 @@ class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переиме
         else:
             soup = BeautifulSoup(str(raw_content), "lxml")
 
-        # Извлекаем первую попавшуюся таблицу с товарами
-        table_products = soup.select_one(f"{self.config.config['table_selector']}")
+        # Извлекаем таблицу с товарами по слектору класса: products-table
+        table_products = soup.select_one(".products-table")
 
         if not table_products:
             raise ExceptionStopParser("Таблица с товарами не найдена")
 
-        # Шаг 1. Извлекаем все карточки товара
-        cards = table_products.select(f"tbody {self.config.config.get('card_selector', 'tr')}")
+        # Шаг 1. Извлекаем все карточки товара по сектору - tr
+        cards = table_products.select("table > tbody > tr")
 
         if not cards:
             raise ExceptionStopParser("Карточки отсутствуют в таблице")
@@ -53,21 +76,30 @@ class GardarikaExtractor(BaseExtractor):  # ИСПРАВЛЕНО: Переиме
             code = tds[1].get_text(strip=True)
 
             # Наличие (колонка 1, index 0)
-            availability = img.get("title") if (img := tds[0].find("img")) else "Много"
+            img = tds[0].find("img")
+            availability_text = img.get("title") if img else tds[0].get_text(strip=True)
+            in_stock = self._parse_availability(availability_text)
 
             # Упаковка (колонка 4, index 3)
             packaging = tds[3].get_text(strip=True)
 
-            # Ссылка (ищем внутри колонки с наименованием)
-            url = link.get("href") if (link := tds[2].find("a")) else None
+            # Цена (колонка 5, index 4)
+            price_text = tds[4].get_text(strip=True)
+            current_price = self._parse_price(price_text)
+
+            # Ссылка (ищем внутри колонки с наименованием) + добавляем префикс для сайта Гардарики
+            url_prefix = self.config.target_url.rstrip("/") if hasattr(self.config, "target_url") else ""
+            url = url_prefix + link.get("href") if (link := tds[2].find("a")) else None
 
             # Шаг 4. Составляем словарь
             product_data = {
-                "product_name": name,
-                "product_code": code,
-                "product_availability": availability,
-                "product_packaging": packaging,
-                "product_url": url,
+                "name": name,
+                "item_id": code,
+                "in_stock": in_stock,
+                "package": packaging,
+                "current_price": current_price,
+                "url": url,
+                "description": "",  # В таблице нет описания, оставляем пустым
             }
 
             # Шаг 5. Добавляем в итоговый список

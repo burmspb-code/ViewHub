@@ -229,6 +229,10 @@ pw-browsers/
 *.db-shm
 *.db-wal
 
+# Local parsing database (создаётся приложением при первом запуске)
+storage/*.db
+tests/data/
+
 # Personal notes for the project defence (not part of the handover)
 docs/defense-*.md
 
