@@ -261,3 +261,51 @@ class DatabaseManager(BaseDataBase):
                 if result and result[0] is not None:
                     return result[0]
                 return 1
+
+    def count_items(self) -> int:
+        """Сколько всего товаров в таблице."""
+        if not self.table_name:
+            return 0
+
+        sql = f'SELECT COUNT(*) FROM "{self.table_name}"'  # noqa: S608
+
+        with self._lock:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                result = cursor.fetchone()
+                return result[0] if result else 0
+
+    def get_items_for_removal_check(self) -> List[tuple]:
+        """
+        Товары с их сведениями — для сверки с тем, что реально есть на сайте.
+
+        Номера страниц отдаются, но для решения «товар удалён» они не годятся:
+        при добавлении новинок каталог сдвигается, и сохранённые номера
+        устаревают. Сопоставление идёт по артикулу.
+        """
+        if not self.table_name:
+            return []
+
+        sql = (
+            f'SELECT "item_id", "brand", "name", "url", "page_number", "in_stock" FROM "{self.table_name}" '  # noqa: S608
+            'WHERE "item_id" IS NOT NULL AND "item_id" != ""'
+        )
+
+        with self._lock:
+            with closing(self._connect()) as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                return [
+                    (
+                        str(row[0]),
+                        {
+                            "brand": row[1],
+                            "name": row[2],
+                            "url": row[3],
+                            "page_number": row[4],
+                            "in_stock": row[5],
+                        },
+                    )
+                    for row in cursor.fetchall()
+                ]

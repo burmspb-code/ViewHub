@@ -41,8 +41,7 @@ from src.service_modules.auth_service import auth_on_click, request_on_click
 from src.service_modules.parsing_service import (
     parsing_on_click,
     parsing_cancel_on_click,
-    prepare_parsing_golden_apple,
-    prepare_parsing_gardarika
+    prepare_parsing_gardarika,
 )
 
 from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
@@ -539,6 +538,20 @@ class MainWindow(QWidget):
 
     def show_parsing_page(self):
         """Открытие меню парсинга."""
+        # Парсер продолжает работать, пока пользователь ходит по другим
+        # разделам. Создавать поверх него новый нельзя: старый поток продолжит
+        # писать в ту же базу, а его воркер и лог окажутся заменены — отменять
+        # и читать журнал было бы уже нечего. Кнопка «НАЧАТЬ» и так заблокирована
+        # на время прогона, здесь нужно только не создавать дубль.
+        if self._thread_is_alive():
+            self.stack.setCurrentIndex(4)
+            # append, а не setText: панель вывода жива, в ней идёт прогресс.
+            self.result_display.append(
+                "ℹ️ Парсинг уже идёт в фоне. Новый запуск станет доступен после "
+                "его завершения или остановки кнопкой «ОТМЕНИТЬ»."
+            )
+            return
+
         try:
             # Запускаем функцию сборки парсера
             prepare_parsing_gardarika(self)
@@ -560,6 +573,45 @@ class MainWindow(QWidget):
             self.result_display.setText(
                 f"⚠️ Внимание\n❌ {e!s}\n\nПожалуйста, устраните проблему и нажмите кнопку 'Парсинг' еще раз."
             )
+
+    def _thread_is_alive(self) -> bool:
+        """Жив ли поток парсинга, с учётом того, что он мог быть удалён.
+
+        После завершения прогона QThread удаляется через deleteLater,
+        но атрибут self.parser_thread продолжает ссылаться на оболочку
+        удалённого объекта C++. Обращение к такому объекту бросает
+        RuntimeError, поэтому проверять isRunning на него нельзя.
+        """
+        thread = getattr(self, "parser_thread", None)
+        if thread is None:
+            return False
+        try:
+            return bool(thread.isRunning())
+        except RuntimeError:
+            # Объект C++ уже удалён: поток завершён, осталась только ссылка.
+            self.parser_thread = None
+            return False
+
+    def closeEvent(self, event):
+        """
+        Корректно закрывает окно во время работающего парсинга.
+
+        Без этого Qt уничтожает живой QThread и приложение падает с
+        «QThread: Destroyed while thread is still running».
+        """
+        if self._thread_is_alive():
+            logger.info("Закрытие окна во время парсинга: останавливаем поток.")
+
+            with suppress(Exception):
+                self.parser_worker.stop()
+
+            with suppress(Exception):
+                self.parser_thread.quit()
+                # Ждём до 15 секунд: этого хватает, чтобы доехать до ближайшей
+                # проверки флага отмены в цикле парсера.
+                self.parser_thread.wait(15000)
+
+        event.accept()
 
     def show_settings_page(self):
         """Переключить стек на страницу настроек (Индекс 2)."""

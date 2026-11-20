@@ -43,13 +43,23 @@ class MockConfig(BaseDBParsingConfig):
         return {**cls.SYSTEM_COLUMNS, **MockConfig.COLUMNS}
 
 
-def test_sqlite_manager_full_flow():
+def test_sqlite_manager_full_flow(tmp_path):
+    """
+    Полный сценарий работы DatabaseManager.
+
+    ВАЖНО: тест обязан работать на временной базе (tmp_path).
+    Раньше DatabaseManager вызывался без пути и попадал в рабочую
+    storage/viewhub_parsing.db, куда записывал тестовые товары (T-Shirt, Jeans)
+    и создавал таблицу test_site_com_mock_test. Эта база передаётся клиенту,
+    поэтому тестовое загрязнение в ней недопустимо.
+    """
     print("🚀 Запуск теста DatabaseManager...")
 
     target_url = "https://test.site.com/products"
     keyword = "mock_test"
 
-    manager = DatabaseManager()
+    # Явный путь к временной базе — рабочая БД остаётся нетронутой
+    manager = DatabaseManager(str(tmp_path / "test_parsing.db"))
 
     # Инициализация: создаст БД, таблицу и проверит схему
     config = MockConfig(target_url, keyword)

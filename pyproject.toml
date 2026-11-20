@@ -126,7 +126,12 @@ omit = [
     "tests/*",
     "*/.venv/*",
     "*/site-packages/*",
-    "main.py"
+    "main.py",
+    # Локальные скрипты для голосовых заметок, к приложению не относятся
+    "record.py",
+    "last.py",
+    "transcribe.py",
+    "download_model.py"
 ]
 
 [tool.coverage.report]

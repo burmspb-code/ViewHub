@@ -8,7 +8,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from src.my_exceptions.exceptions import ExceptionStopParser
-from src.core.base_classes import BaseParser
+from src.core.base_classes import BaseParser, BaseDBParsingConfig, BaseExtractor
+from src.database.sqlite_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class GardarikaParser(BaseParser):
             new_items = self.extractor.extract_data(soup)
 
             if new_items:
-                self.manager.save(new_items) # Записываем в БД
+                self.manager.save(new_items)  # Записываем в БД
                 yield new_items  # Отдаем пачку воркеру, который сам проверит флаг "Стоп"
             else:
                 raise ExceptionStopParser("По вашему запросу ничего не найдено.")
