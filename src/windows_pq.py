@@ -41,7 +41,7 @@ from src.service_modules.auth_service import auth_on_click, request_on_click
 from src.service_modules.parsing_service import (
     parsing_on_click,
     parsing_cancel_on_click,
-    prepare_parsing_gardarika,
+    prepare_parsing_citadel,
 )
 
 from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
@@ -352,7 +352,7 @@ class MainWindow(QWidget):
         self.target_url_input = QLineEdit()
         # self.target_url_input.setPlaceholderText("https://target-url")
         # Предустанавливаем значение вместо плейсхолдера
-        self.target_url_input.setText("https://gardarika-spb.ru/")
+        self.target_url_input.setText("https://citadel2000.ru/")
         # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
         self.target_url_input.setReadOnly(True)
         self.target_url_input.setFixedHeight(35)
@@ -554,7 +554,7 @@ class MainWindow(QWidget):
 
         try:
             # Запускаем функцию сборки парсера
-            prepare_parsing_gardarika(self)
+            prepare_parsing_citadel(self)
 
             # Перекидываем пользователя в меню парсинга (индекс 4)
             self.stack.setCurrentIndex(4)

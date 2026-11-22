@@ -113,12 +113,9 @@ filterwarnings = [
 # Связываем покрытие со всем корнем проекта и конкретными источниками
 source = [".", "src"]
 omit = [
-    "src/parsers_config/citadel_config.py",
     "src/parsers_config/gardarika_config.py",
-    "src/parsers/citadel_parser.py",
     "src/parsers/gardarika_parser.py",
     "src/extractors/gardarika_extractor.py",
-    "src/extractors/citadel_extractor.py",
     "src/scanners/async_scan_ep.py",
     "src/scanners/auto_blind_fuzzer.py",
     "src/scanners/scaner_api.py",

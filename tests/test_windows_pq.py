@@ -216,7 +216,7 @@ class TestInitialState:
     def test_target_url_readonly(self, main_window):
         """Проверяет, что поле целевого URL только для чтения."""
         assert main_window.target_url_input.isReadOnly()
-        assert main_window.target_url_input.text() == "https://gardarika-spb.ru/"
+        assert main_window.target_url_input.text() == "https://citadel2000.ru/"
 
     def test_log_display_readonly(self, main_window):
         """Проверяет, что панель логов только для чтения."""
@@ -235,7 +235,7 @@ class TestParsingPageGuard:
 
     def test_no_parser_created_while_thread_running(self, main_window, mocker):
         """При живом потоке парсер не пересоздаётся."""
-        mock_prepare = mocker.patch("src.windows_pq.prepare_parsing_gardarika")
+        mock_prepare = mocker.patch("src.windows_pq.prepare_parsing_citadel")
 
         thread = mocker.MagicMock()
         thread.isRunning.return_value = True
@@ -252,7 +252,7 @@ class TestParsingPageGuard:
 
     def test_guard_uses_append_not_settext(self, main_window, mocker):
         """Прогресс парсинга в панели вывода не затирается."""
-        mocker.patch("src.windows_pq.prepare_parsing_gardarika")
+        mocker.patch("src.windows_pq.prepare_parsing_citadel")
         main_window.result_display.setText("загрузка страницы 7")
         main_window.parser_thread = mocker.MagicMock()
         main_window.parser_thread.isRunning.return_value = True

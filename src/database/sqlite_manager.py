@@ -110,10 +110,44 @@ class DatabaseManager(BaseDataBase):
 
         return f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n    {cols_def}\n)'
 
+    @staticmethod
+    def _column_base_type(definition: str) -> str:
+        """
+        Возвращает тип колонки без ограничений NOT NULL/UNIQUE/PRIMARY KEY.
+
+        SQLite не позволяет добавить NOT NULL-колонку без DEFAULT в непустую
+        таблицу, поэтому при миграции добавляем только базовый тип.
+        """
+        match = re.match(r"\s*([A-Za-z]+(?:\s*\([^)]*\))?)", definition)
+        if match is None:
+            raise ValueError(f"Не удалось определить тип колонки: {definition!r}")
+        return match.group(1)
+
+    def _add_missing_columns(self, conn, table_name: str, config: BaseDBParsingConfig) -> List[str]:
+        """Добавляет в существующую таблицу колонки, появившиеся в схеме конфига."""
+        schema = dict(config.get_full_schema())
+        # _build_create_sql добавляет это поле отдельно — миграция должна делать то же.
+        schema.setdefault("page_number", "INTEGER")
+
+        existing = {row[1] for row in conn.execute(f'PRAGMA table_info("{table_name}")')}
+        missing = {name: definition for name, definition in schema.items() if name not in existing}
+        if not missing:
+            return []
+
+        added = []
+        for name, definition in missing.items():
+            column_type = self._column_base_type(str(definition))
+            conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{name}" {column_type}')
+            added.append(name)
+
+        logger.info("Добавлены недостающие колонки в '%s': %s", table_name, ", ".join(added))
+        return added
+
     def ensure_table(self, config: BaseDBParsingConfig) -> str:
         """Проверяет и обеспечивает существование таблицы в SQLite.
         Генерирует имя таблицы, валидирует схему и колонку дедупликации,
-        после чего создает таблицу в БД, если она еще не существовала.
+        создает таблицу, если её нет, и добавляет недостающие колонки,
+        если схема парсера изменилась с момента прошлого запуска.
         Args:
             config (BaseDBParsingConfig): Конфигурация парсера со схемой и настройками.
         Returns:
@@ -138,6 +172,7 @@ class DatabaseManager(BaseDataBase):
         with closing(self._connect()) as conn:
             try:
                 conn.execute(create_sql)
+                self._add_missing_columns(conn, table_name, config)
                 conn.commit()
             except Exception as e:
                 logger.error(f"Ошибка БД: {e}")
