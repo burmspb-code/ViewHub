@@ -2,6 +2,7 @@ import pytest
 import sqlite3
 
 from src.database.sqlite_manager import DatabaseManager
+from src.parsers_config.citadel_config import CitadelConfig
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 
 
@@ -124,6 +125,33 @@ def test_get_full_schema_merging(system_shema, business_shema):
     # Общий размер должен быть равен сумме длин без пересечений
     expected_len = len(GoldenAppleConfig.SYSTEM_COLUMNS) + len(GoldenAppleConfig.BUSINESS_COLUMNS)
     assert len(full_schema) == expected_len
+
+
+def test_ensure_table_adds_missing_columns_and_keeps_data(db_manager):
+    """Старая таблица должна получать новые колонки без потери строк."""
+    table_name = db_manager._make_table_name(CitadelConfig)
+
+    old_conn = sqlite3.connect(db_manager.db_path)
+    old_conn.execute(
+        f'CREATE TABLE "{table_name}" ('
+        '"id" INTEGER PRIMARY KEY, "item_id" TEXT, "name" TEXT, "page_number" INTEGER)'
+    )
+    old_conn.execute(
+        f'INSERT INTO "{table_name}" (item_id, name) VALUES (?, ?)',  # noqa: S608 - имя таблицы фиксировано в тесте
+        ("old_item", "Старый товар"),
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    db_manager.ensure_table(CitadelConfig)
+
+    conn = sqlite3.connect(db_manager.db_path)
+    columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{table_name}")')}
+    row = conn.execute(f'SELECT item_id, name, code, brand FROM "{table_name}"').fetchone()  # noqa: S608
+    conn.close()
+
+    assert {"code", "brand", "availability", "description", "current_price", "url"} <= columns
+    assert row == ("old_item", "Старый товар", None, None)
 
 
 def test_build_create_sql_executes_successfully(db_manager, config_db):

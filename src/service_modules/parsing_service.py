@@ -6,12 +6,19 @@ from contextlib import suppress
 
 from PyQt6.QtCore import QThread
 
+
 from src.extractors.golden_apple_extractor import GoldenAppleExtractor
 from src.extractors.gardarika_extractor import GardarikaExtractor
+from src.extractors.citadel_extractor import CitadelExtractor
+
 from src.parsers.golden_apple_parser import GoldenAppleParser
 from src.parsers.gardarika_parser import GardarikaParser
+from src.parsers.citadel_parser import CitadelParser
+
 from src.parsers_config.golden_apple_config import GoldenAppleConfig
 from src.parsers_config.gardarika_config import GardarikaConfig
+from src.parsers_config.citadel_config import CitadelConfig
+
 from src.database.sqlite_manager import DatabaseManager
 from src.workers.parser_worker import ParserWorker
 
@@ -90,7 +97,7 @@ def parsing_on_click(obj) -> None:
     # Затем создаем рабочий объект (Воркер) и передаем ему готовый парсер из объекта окна
     obj.parser_worker = ParserWorker(parser=obj.parser)
 
-    # ИСПРАВЛЕНО: Прикрепляем колбэк прогресса к ПРАВИЛЬНОМУ объекту парсера через obj.
+    # Прикрепляем колбэк прогресса к ПРАВИЛЬНОМУ объекту парсера через obj.
     obj.parser.progress_callback = obj.parser_worker.progress_signal.emit
 
     # Перемещаем воркер в фоновый поток
@@ -130,6 +137,14 @@ def prepare_parsing_gardarika(obj) -> None:
     extractor = GardarikaExtractor(config)
     obj.manager = DatabaseManager()
     obj.parser = GardarikaParser(config=config, extractor=extractor, manager=obj.manager)
+
+
+def prepare_parsing_citadel(obj) -> None:
+    """Сборка парсера для Цитадели."""
+    config = CitadelConfig()
+    extractor = CitadelExtractor(config)
+    obj.manager = DatabaseManager()
+    obj.parser = CitadelParser(config=config, extractor=extractor, manager=obj.manager)
 
 
 def parsing_cancel_on_click(obj) -> None:
