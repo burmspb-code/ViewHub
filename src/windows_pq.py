@@ -8,19 +8,49 @@
 
 import logging
 
+from contextlib import suppress
+
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                             QLineEdit, QPushButton, QTextEdit, QLabel,
-                             QFrame, QSplitter, QStackedWidget)
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSplitter,
+    QStackedWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
-from src.core.logger import QTextEditHandler
+from src.core.logger import register_gui_handler
 from src.core.resources import load_app_icon
-from src.core.styles import (GLOBAL_STYLE, SIDEBAR_STYLE, BACK_BUTTON_STYLE,
-                             TOGGLE_PASS_BUTTON_STYLE, SUBMIT_BUTTON_STYLE, LOG_DISPLAY_STYLE)
-from src.services import auth_on_click, request_on_click, scanning_on_click
+from src.core.styles import (
+    BACK_BUTTON_STYLE,
+    GLOBAL_STYLE,
+    LOG_DISPLAY_STYLE,
+    SIDEBAR_STYLE,
+    SUBMIT_BUTTON_STYLE,
+    CANCEL_BUTTON_STYLE,
+    TOGGLE_PWD_VISIBILITY_STYLE,
+    EXPORT_BUTTON_STYLE,
+    PREVIEW_BUTTON_STYLE,
+)
+from src.service_modules.auth_service import auth_on_click, request_on_click
+from src.service_modules.parsing_service import (
+    parsing_on_click,
+    parsing_cancel_on_click,
+    prepare_parsing_citadel,
+)
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+from src.service_modules.scanning_service import scanning_on_click, scanning_cancel_on_click
+from src.service_modules.export_service import parsing_export_on_click
+from src.service_modules.db_viewer_service import parsing_preview_on_click
+
+
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QWidget):
     """
@@ -65,6 +95,7 @@ class MainWindow(QWidget):
         # Элементы полей настроек (для примера предустановок)
         self.timeout_input = None
         self.btn_save_settings = None
+        self.proxy_url = None
 
         # Навигация сканирования
         self.btn_scanning_menu = None
@@ -72,6 +103,18 @@ class MainWindow(QWidget):
         self.btn_back_scanning = None
         self.page_scanning = None
         self.btn_send_scanning = None
+        self.btn_cancel_scanning = None
+
+        # Навигация парсинга
+        self.page_parsing = None
+        self.btn_back_parsing = None
+        self.target_url_input = None
+        self.btn_send_parsing = None
+        self.btn_parsing_menu = None
+        self.key_word_input = None
+        self.btn_cancel_parsing = None
+        self.btn_export_parsing = None
+        self.btn_preview_parsing = None
 
         # Навигация запроса
         self.btn_request_menu = None
@@ -86,16 +129,22 @@ class MainWindow(QWidget):
 
         self.result_display = None
         self.zone2 = None
+        self.db_viewer = None  # Виджет для просмотра таблицы БД
 
         self.zone3 = None
         self.log_display = None
 
-        self.init_ui()
-        self.connect_signals()
-
         # Задаем токен и url для дальнейшей работы
         self.auth_token = None
         self.base_url = None
+
+        # Для экспорта данных парсинга
+        self.parser = None
+        self.manager = None
+
+        # Инициализация графической оболочки (ОБЯЗАТЕЛЬНО ДО ЛОГГЕРА)
+        self.init_ui()
+        self.connect_signals()
 
     def init_ui(self):
         """Инициализация, стилизация и компоновка виджетов окна."""
@@ -132,7 +181,7 @@ class MainWindow(QWidget):
         menu_layout.setContentsMargins(0, 0, 0, 0)
         menu_layout.setSpacing(12)
 
-        lbl_title = QLabel("МЕНЮ ДЕЙСТВИЙ")
+        lbl_title = QLabel("МЕНЮ")
         lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #94a3b8; letter-spacing: 1px;")
         menu_layout.addWidget(lbl_title)
 
@@ -146,10 +195,15 @@ class MainWindow(QWidget):
         self.btn_request_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_request_menu)
 
-        self.btn_scanning_menu = QPushButton("📡  СКАНИРОВАНИЕ")
+        self.btn_scanning_menu = QPushButton("💀  СКАНИРОВАНИЕ")
         self.btn_scanning_menu.setMinimumHeight(45)
         self.btn_scanning_menu.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_layout.addWidget(self.btn_scanning_menu)
+
+        self.btn_parsing_menu = QPushButton("👽 ПАРСИНГ")
+        self.btn_parsing_menu.setMinimumHeight(45)
+        self.btn_parsing_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_layout.addWidget(self.btn_parsing_menu)
 
         self.btn_settings_menu = QPushButton("⚙️  НАСТРОЙКИ")
         self.btn_settings_menu.setMinimumHeight(45)
@@ -201,7 +255,7 @@ class MainWindow(QWidget):
         self.btn_toggle_pass.setFixedWidth(75)
         self.btn_toggle_pass.setFixedHeight(35)  # Выравниваем с полем ввода
         self.btn_toggle_pass.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_toggle_pass.setStyleSheet(TOGGLE_PASS_BUTTON_STYLE)
+        self.btn_toggle_pass.setStyleSheet(TOGGLE_PWD_VISIBILITY_STYLE)
 
         pass_layout.addWidget(self.password_input)
         pass_layout.addWidget(self.btn_toggle_pass)
@@ -218,48 +272,7 @@ class MainWindow(QWidget):
         self.stack.addWidget(self.page_auth)
 
         # ==========================================
-        # СТРАНИЦА 3: ОКНО НАСТРОЕК
-        # ==========================================
-        self.page_settings = QWidget()
-        settings_layout = QVBoxLayout(self.page_settings)  # Исправлено: привязка к self.page_settings
-        settings_layout.setContentsMargins(0, 0, 0, 0)
-        settings_layout.setSpacing(10)
-
-        self.btn_back_settings = QPushButton("←  Назад к меню")
-        self.btn_back_settings.setStyleSheet(BACK_BUTTON_STYLE)
-        settings_layout.addWidget(self.btn_back_settings)
-        settings_layout.addSpacing(5)
-
-        lbl_settings_title = QLabel("Предустановки системы")
-        lbl_settings_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #ffffff;")
-        settings_layout.addWidget(lbl_settings_title)
-        settings_layout.addSpacing(5)
-
-        settings_layout.addWidget(QLabel("Таймаут запросов (сек):"))
-        self.timeout_input = QLineEdit()
-        self.timeout_input.setPlaceholderText("7")
-        self.timeout_input.setText("7")
-        self.timeout_input.setFixedHeight(35)  # Фиксируем высоту
-        settings_layout.addWidget(self.timeout_input)
-
-        settings_layout.addWidget(QLabel("Папка импорта данных:"))
-        self.import_path_input = QLineEdit()
-        self.import_path_input.setPlaceholderText("./logs")
-        self.import_path_input.setFixedHeight(35)  # Фиксируем высоту
-        settings_layout.addWidget(self.import_path_input)
-
-        settings_layout.addSpacing(15)
-        self.btn_save_settings = QPushButton("Сохранить конфигурацию")
-        self.btn_save_settings.setMinimumHeight(42)
-        self.btn_save_settings.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_save_settings.setStyleSheet(SUBMIT_BUTTON_STYLE)
-        settings_layout.addWidget(self.btn_save_settings)
-
-        settings_layout.addStretch()
-        self.stack.addWidget(self.page_settings)
-
-        # ==========================================
-        # СТРАНИЦА 4: ОКНО ЗАПРОСА
+        # СТРАНИЦА 3: ОКНО ЗАПРОСА
         # ==========================================
         self.page_request = QWidget()
         request_layout = QVBoxLayout(self.page_request)  # ИСПРАВЛЕНО: теперь привязано к self.page_request!
@@ -288,7 +301,7 @@ class MainWindow(QWidget):
         self.stack.addWidget(self.page_request)
 
         # ==========================================
-        # СТРАНИЦА 5: ОКНО СКАНИРОВАНИЯ
+        # СТРАНИЦА 4: ОКНО СКАНИРОВАНИЯ
         # ==========================================
         self.page_scanning = QWidget()
         scanning_layout = QVBoxLayout(self.page_scanning)
@@ -311,10 +324,125 @@ class MainWindow(QWidget):
         self.btn_send_scanning.setMinimumHeight(42)
         self.btn_send_scanning.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_send_scanning.setStyleSheet(SUBMIT_BUTTON_STYLE)
-        scanning_layout.addWidget(self.btn_send_scanning)  # ИСПРАВЛЕНО: добавляем в request_layout!
+        scanning_layout.addWidget(self.btn_send_scanning)
+
+        self.btn_cancel_scanning = QPushButton("ОТМЕНИТЬ")
+        self.btn_cancel_scanning.setMinimumHeight(42)
+        self.btn_cancel_scanning.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_scanning.setStyleSheet(CANCEL_BUTTON_STYLE)
+        scanning_layout.addWidget(self.btn_cancel_scanning)
 
         scanning_layout.addStretch()
         self.stack.addWidget(self.page_scanning)
+
+        # ==========================================
+        # СТРАНИЦА 5: ОКНО ПАРСИНГА
+        # ==========================================
+        self.page_parsing = QWidget()
+        parsing_layout = QVBoxLayout(self.page_parsing)
+        parsing_layout.setContentsMargins(0, 0, 0, 0)
+        parsing_layout.setSpacing(5)
+
+        self.btn_back_parsing = QPushButton("←  Назад к меню")
+        self.btn_back_parsing.setStyleSheet(BACK_BUTTON_STYLE)
+        parsing_layout.addWidget(self.btn_back_parsing)
+        parsing_layout.addSpacing(5)
+
+        parsing_layout.addWidget(QLabel("Целевой URL:"))
+        self.target_url_input = QLineEdit()
+        # self.target_url_input.setPlaceholderText("https://target-url")
+        # Предустанавливаем значение вместо плейсхолдера
+        self.target_url_input.setText("https://citadel2000.ru/")
+        # Замораживаем ввод (пользователь сможет выделить и скопировать текст, но не изменить)
+        self.target_url_input.setReadOnly(True)
+        self.target_url_input.setFixedHeight(35)
+        parsing_layout.addWidget(self.target_url_input)
+        parsing_layout.addSpacing(5)
+
+        parsing_layout.addWidget(QLabel("Ключевая фраза или раздел каталога:"))
+        self.key_word_input = QLineEdit()
+        self.key_word_input.setPlaceholderText("Key word")
+        self.key_word_input.setFixedHeight(35)
+        parsing_layout.addWidget(self.key_word_input)
+        parsing_layout.addSpacing(5)
+
+        self.btn_send_parsing = QPushButton("НАЧАТЬ")
+        self.btn_send_parsing.setMinimumHeight(42)
+        self.btn_send_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_send_parsing.setStyleSheet(SUBMIT_BUTTON_STYLE)
+        parsing_layout.addWidget(self.btn_send_parsing)
+
+        self.btn_cancel_parsing = QPushButton("ОТМЕНИТЬ")
+        self.btn_cancel_parsing.setMinimumHeight(42)
+        self.btn_cancel_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel_parsing.setStyleSheet(CANCEL_BUTTON_STYLE)
+        self.btn_cancel_parsing.setEnabled(False)  # Отключена по умолчанию
+        parsing_layout.addWidget(self.btn_cancel_parsing)
+
+        self.btn_preview_parsing = QPushButton("ПРОСМОТР")
+        self.btn_preview_parsing.setMinimumHeight(42)
+        self.btn_preview_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_preview_parsing.setStyleSheet(PREVIEW_BUTTON_STYLE)
+        self.btn_preview_parsing.setEnabled(False)  # Отключена по умолчанию
+        parsing_layout.addWidget(self.btn_preview_parsing)
+
+        self.btn_export_parsing = QPushButton("ЭКСПОРТ")
+        self.btn_export_parsing.setMinimumHeight(42)
+        self.btn_export_parsing.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_export_parsing.setStyleSheet(EXPORT_BUTTON_STYLE)
+        self.btn_export_parsing.setEnabled(False)  # Отключена по умолчанию
+        parsing_layout.addWidget(self.btn_export_parsing)
+
+        parsing_layout.addStretch()
+        self.stack.addWidget(self.page_parsing)
+
+        # ==========================================
+        # СТРАНИЦА 6: ОКНО НАСТРОЕК
+        # ==========================================
+        self.page_settings = QWidget()
+        settings_layout = QVBoxLayout(self.page_settings)  # Исправлено: привязка к self.page_settings
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(10)
+
+        self.btn_back_settings = QPushButton("←  Назад к меню")
+        self.btn_back_settings.setStyleSheet(BACK_BUTTON_STYLE)
+        settings_layout.addWidget(self.btn_back_settings)
+        settings_layout.addSpacing(5)
+
+        lbl_settings_title = QLabel("Настройки системы")
+        lbl_settings_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #ffffff;")
+        settings_layout.addWidget(lbl_settings_title)
+        settings_layout.addSpacing(5)
+
+        settings_layout.addWidget(QLabel("Таймаут запросов (сек):"))
+        self.timeout_input = QLineEdit()
+        self.timeout_input.setPlaceholderText("10")
+        self.timeout_input.setText("")
+        self.timeout_input.setFixedHeight(35)  # Фиксируем высоту
+        settings_layout.addWidget(self.timeout_input)
+
+        settings_layout.addWidget(QLabel("Загрузить базовую конфигурацию"))
+        self.import_path_input = QLineEdit()
+        self.import_path_input.setPlaceholderText("table_shema")
+        self.import_path_input.setText("")
+        self.import_path_input.setFixedHeight(35)  # Фиксируем высоту
+        settings_layout.addWidget(self.import_path_input)
+
+        settings_layout.addWidget(QLabel("Прокси адрес:"))
+        self.proxy_url = QLineEdit()
+        self.proxy_url.setPlaceholderText("176.15.164.69")
+        self.proxy_url.setFixedHeight(35)  # Фиксируем высоту
+        settings_layout.addWidget(self.proxy_url)
+
+        settings_layout.addSpacing(15)
+        self.btn_save_settings = QPushButton("Сохранить конфигурацию")
+        self.btn_save_settings.setMinimumHeight(42)
+        self.btn_save_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save_settings.setStyleSheet(SUBMIT_BUTTON_STYLE)
+        settings_layout.addWidget(self.btn_save_settings)
+
+        settings_layout.addStretch()
+        self.stack.addWidget(self.page_settings)
 
         # =============== Зона 2: Результат ===============
         self.zone2 = QFrame()
@@ -322,18 +450,19 @@ class MainWindow(QWidget):
         z2_layout = QVBoxLayout(self.zone2)
         z2_layout.setContentsMargins(15, 15, 15, 15)
 
-        lbl_data_title = QLabel("<b>📋 ПАНЕЛЬ ВЫВОДА ДАННЫХ</b>")
+        lbl_data_title = QLabel("<b>📋 ВЫВОД ДАННЫХ</b>")
         lbl_data_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
         z2_layout.addWidget(lbl_data_title)
 
         self.result_display = QTextEdit()
-        self.result_display.setPlaceholderText("Здесь будут отображаться структурированные ответы от Django API...")
+        self.result_display.setPlaceholderText("Здесь будет отображаться текущая справочная информация...")
         z2_layout.addWidget(self.result_display)
 
         top_splitter.addWidget(self.zone1)
         top_splitter.addWidget(self.zone2)
-        top_splitter.setStretchFactor(0, 1)
-        top_splitter.setStretchFactor(1, 2)
+        top_splitter.setStretchFactor(0, 0)  # zone1 фиксированной ширины
+        top_splitter.setStretchFactor(1, 1)  # zone2 занимает всё оставшееся пространство
+        top_splitter.setSizes([350, 750])  # Фиксированная ширина zone1 = 350px
 
         # --- СОЗДАЕМ ГЛАВНЫЙ ВЕРТИКАЛЬНЫЙ СПЛИТТЕР ---
         main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -344,7 +473,7 @@ class MainWindow(QWidget):
         z3_layout = QVBoxLayout(self.zone3)
         z3_layout.setContentsMargins(15, 15, 15, 15)
 
-        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ (ЛОГИ)</b>")
+        lbl_log_title = QLabel("<b>🛠️ СИСТЕМНЫЙ ЖУРНАЛ</b>")
         lbl_log_title.setStyleSheet("color: #64748b; font-size: 12px; letter-spacing: 0.5px;")
         z3_layout.addWidget(lbl_log_title)
 
@@ -356,20 +485,13 @@ class MainWindow(QWidget):
 
         main_splitter.addWidget(top_splitter)
         main_splitter.addWidget(self.zone3)
-        main_splitter.setStretchFactor(0, 3)
-        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setStretchFactor(0, 65)
+        main_splitter.setStretchFactor(1, 35)
 
         layout.addWidget(main_splitter)
 
         # Подключаем логгер для окна логов
-        qt_handler = QTextEditHandler(self.log_display)
-        qt_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s]: %(message)s", datefmt="%H:%M:%S"))
-        qt_handler.setLevel(logging.DEBUG)
-        logging.getLogger().addHandler(qt_handler)
-
-    def show_settings_page(self):
-        """Переключить стек на страницу настроек (Индекс 2)."""
-        self.stack.setCurrentIndex(2)
+        register_gui_handler(self.log_display, level=logging.INFO)
 
     def on_save_settings_click(self):
         """
@@ -380,7 +502,9 @@ class MainWindow(QWidget):
 
         logger.info(f"Конфигурация обновлена: Таймаут={timeout_val}с, Путь импорта='{path_val}'")
         self.result_display.append(
-            f"[⚙️ CONFIG] Успешно сохранены предустановки:\n- Network Timeout: {timeout_val} seconds\n- Data Directory: {path_val}")
+            f"[⚙️ CONFIG] Успешно сохранены предустановки:"
+            f"\n- Network Timeout: {timeout_val} seconds\n- Data Directory: {path_val}"
+        )
 
         # После сохранения красиво возвращаем пользователя в меню
         self.show_menu_page()
@@ -406,12 +530,92 @@ class MainWindow(QWidget):
 
     def show_request_page(self):
         """Открыть страницу запроса."""
-        self.stack.setCurrentIndex(3) # Возвращаем на индекс запроса (3)
+        self.stack.setCurrentIndex(2)  # Возвращаем на индекс запроса (2)
 
     def show_scanning_page(self):
         """Открыть страницу сканирования."""
-        self.stack.setCurrentIndex(4) # Возвращаем на индекс сканирования (3)
+        self.stack.setCurrentIndex(3)  # Возвращаем на индекс сканирования (3)
 
+    def show_parsing_page(self):
+        """Открытие меню парсинга."""
+        # Парсер продолжает работать, пока пользователь ходит по другим
+        # разделам. Создавать поверх него новый нельзя: старый поток продолжит
+        # писать в ту же базу, а его воркер и лог окажутся заменены — отменять
+        # и читать журнал было бы уже нечего. Кнопка «НАЧАТЬ» и так заблокирована
+        # на время прогона, здесь нужно только не создавать дубль.
+        if self._thread_is_alive():
+            self.stack.setCurrentIndex(4)
+            # append, а не setText: панель вывода жива, в ней идёт прогресс.
+            self.result_display.append(
+                "ℹ️ Парсинг уже идёт в фоне. Новый запуск станет доступен после "
+                "его завершения или остановки кнопкой «ОТМЕНИТЬ»."
+            )
+            return
+
+        try:
+            # Запускаем функцию сборки парсера
+            prepare_parsing_citadel(self)
+
+            # Перекидываем пользователя в меню парсинга (индекс 4)
+            self.stack.setCurrentIndex(4)
+
+            # Выводим готовое описание парсера на новый экран
+            self.result_display.setText(f"🔔 ОПИСАНИЕ\n{self.parser.description}\n\n")
+
+        except (ValueError, RuntimeError) as e:
+            # Закрываем менеджер напрямую через self, если он успел создаться
+            if getattr(self, "manager", None) is not None:
+                with suppress(Exception):
+                    self.manager.close()
+            # Тотальное обнуление для чистоты системы
+            self.manager = None
+            self.parser = None
+            self.result_display.setText(
+                f"⚠️ Внимание\n❌ {e!s}\n\nПожалуйста, устраните проблему и нажмите кнопку 'Парсинг' еще раз."
+            )
+
+    def _thread_is_alive(self) -> bool:
+        """Жив ли поток парсинга, с учётом того, что он мог быть удалён.
+
+        После завершения прогона QThread удаляется через deleteLater,
+        но атрибут self.parser_thread продолжает ссылаться на оболочку
+        удалённого объекта C++. Обращение к такому объекту бросает
+        RuntimeError, поэтому проверять isRunning на него нельзя.
+        """
+        thread = getattr(self, "parser_thread", None)
+        if thread is None:
+            return False
+        try:
+            return bool(thread.isRunning())
+        except RuntimeError:
+            # Объект C++ уже удалён: поток завершён, осталась только ссылка.
+            self.parser_thread = None
+            return False
+
+    def closeEvent(self, event):
+        """
+        Корректно закрывает окно во время работающего парсинга.
+
+        Без этого Qt уничтожает живой QThread и приложение падает с
+        «QThread: Destroyed while thread is still running».
+        """
+        if self._thread_is_alive():
+            logger.info("Закрытие окна во время парсинга: останавливаем поток.")
+
+            with suppress(Exception):
+                self.parser_worker.stop()
+
+            with suppress(Exception):
+                self.parser_thread.quit()
+                # Ждём до 15 секунд: этого хватает, чтобы доехать до ближайшей
+                # проверки флага отмены в цикле парсера.
+                self.parser_thread.wait(15000)
+
+        event.accept()
+
+    def show_settings_page(self):
+        """Переключить стек на страницу настроек (Индекс 2)."""
+        self.stack.setCurrentIndex(5)  # Возвращаем на индекс парсинга (5)
 
     def connect_signals(self):
         """Подключение обработчиков (слотов) к сигналам виджетов."""
@@ -420,19 +624,28 @@ class MainWindow(QWidget):
         self.btn_auth_menu.clicked.connect(self.show_auth_page)  # На форму авторизации
         self.btn_back.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_toggle_pass.clicked.connect(self.toggle_password_visibility)  # На скрыть/показать пароль
-        self.btn_send_auth.clicked.connect(lambda: auth_on_click(self)) # На аутентификацию
+        self.btn_send_auth.clicked.connect(lambda: auth_on_click(self))  # На аутентификацию
 
         # Запрос
         self.btn_request_menu.clicked.connect(self.show_request_page)  # На форму запроса
         self.btn_back_request.clicked.connect(self.show_menu_page)  # Назад в меню
-        self.btn_send_request.clicked.connect(lambda: request_on_click(self)) #На запрос по API
+        self.btn_send_request.clicked.connect(lambda: request_on_click(self))  # На запрос по API
 
         # Сканирование
         self.btn_scanning_menu.clicked.connect(self.show_scanning_page)  # На форму сканирования
         self.btn_back_scanning.clicked.connect(self.show_menu_page)  # Назад в меню
         self.btn_send_scanning.clicked.connect(lambda: scanning_on_click(self))  # На сканирование
+        self.btn_cancel_scanning.clicked.connect(lambda: scanning_cancel_on_click(self))  # Отмена сканирования
+
+        # Парсинг
+        self.btn_parsing_menu.clicked.connect(self.show_parsing_page)  # На форму парсинга
+        self.btn_back_parsing.clicked.connect(self.show_menu_page)  # Назад в меню
+        self.btn_send_parsing.clicked.connect(lambda: parsing_on_click(self))  # На парсинг
+        self.btn_cancel_parsing.clicked.connect(lambda: parsing_cancel_on_click(self))  # Отмена парсинга
+        self.btn_export_parsing.clicked.connect(lambda: parsing_export_on_click(self))  # Экспорт парсинга
+        self.btn_preview_parsing.clicked.connect(lambda: parsing_preview_on_click(self))  # Просмотр парсинга
 
         # Настройки
-        self.btn_settings_menu.clicked.connect(self.show_settings_page) # На форму настроек
+        self.btn_settings_menu.clicked.connect(self.show_settings_page)  # На форму настроек
         self.btn_back_settings.clicked.connect(self.show_menu_page)
         self.btn_save_settings.clicked.connect(self.on_save_settings_click)

@@ -78,30 +78,91 @@ SIDEBAR_STYLE = """
 
 # Стиль кнопки возврата "Назад"
 BACK_BUTTON_STYLE = """
-    QPushButton { 
-        background-color: transparent; 
-        color: #94a3b8; 
-        border: none; 
-        text-align: left; 
-        padding: 5px 0px; 
+    QPushButton {
+        background-color: transparent;
+        color: #94a3b8;
+        border: none;
+        text-align: left;
+        padding: 5px 0px;
     }
-    QPushButton:hover { 
-        color: #f8fafc; 
+    QPushButton:hover {
+        color: #f8fafc;
+    }
+"""
+
+# Стиль кнопки "Экспорт" (с заливкой)
+EXPORT_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #334155; /* Slate 700 */
+        color: #f8fafc;            /* Slate 50 */
+        border: 1px solid #475569; /* Slate 600 */
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background-color: #475569; /* Slate 600 */
+        border-color: #64748b;     /* Slate 500 */
+    }
+    QPushButton:pressed {
+        background-color: #1e293b; /* Slate 800 */
+    }
+"""
+
+PREVIEW_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #104E8B; /* Очень глубокий темно синий */
+        color: #e2e8f0;            /* Slate 200 */
+        border: 1px solid #1e293b; /* Slate 800 */
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        background-color: #1e3a8a; /* Blue 900 (Проявляется синий при наведении) */
+        color: #f8fafc;            /* Slate 50 */
+        border-color: #2563eb;     /* Blue 600 */
+    }
+    QPushButton:pressed {
+        background-color: #0f172a; /* Slate 900 */
     }
 """
 
 # Стиль компактной кнопки "Показать" пароль
-TOGGLE_PASS_BUTTON_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;"
+TOGGLE_PWD_VISIBILITY_STYLE = "background-color: #475569; font-size: 11px; padding: 8px 5px;"  # noqa: S105
 
-# Зеленая акцентная кнопка "Войти"
-SUBMIT_BUTTON_STYLE = "background-color: #10b981; color: white;"
+# Зеленая акцентная кнопка "Войти/Начать"
+SUBMIT_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #10b981;
+        color: white;
+        border-radius: 4px;
+        padding: 6px 12px;
+    }
+    QPushButton:hover {
+        background-color: #059669;
+    }
+"""
+
+# Красная акцентная кнопка "Отменить"
+CANCEL_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #ef4444;
+        color: white;
+        border-radius: 4px;
+        padding: 6px 12px;
+    }
+    QPushButton:hover {
+        background-color: #dc2626;
+    }
+"""
 
 # Темный "хакерский" стиль для консоли логов (Зона 3)
 LOG_DISPLAY_STYLE = """
-    QTextEdit { 
-        background-color: #0f172a; 
-        color: #38bdf8; 
-        font-family: 'Consolas', 'Courier New', monospace; 
+    QTextEdit {
+        background-color: #0f172a;
+        color: #38bdf8;
+        font-family: 'Consolas', 'Courier New', monospace;
         font-size: 12px;
         border: 1px solid #1e293b;
     }

@@ -1,19 +1,14 @@
-"""Модуль управления бизнес-логикой проекта."""
+"""Сервисный слой для авторизации и API-запросов."""
 
 import json
 import logging
-import httpx  # Изолированный и стабильный сетевой клиент вместо requests
 
-# Убираем QApplication, так как вызовы processEvents() перегружали стек событий Qt
-# и приводили к аппаратным сбоям C++ (0xC0000409).
+import httpx
 
 from src.auth.api_client import login_to_django
-from src.core.auto_blind_fuzzer import run_security_api_scan
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-# ======================= Логика обработки пользовательских запросов ============================
 
 def auth_on_click(obj) -> None:
     """
@@ -69,7 +64,7 @@ def request_on_click(obj) -> None:
     Returns:
         None
     """
-    # 1. Проверяем, авторизован ли пользователь
+    # Проверяем, авторизован ли пользователь
     base_url = getattr(obj, "base_url", None)
     token = getattr(obj, "auth_token", None)
 
@@ -78,7 +73,7 @@ def request_on_click(obj) -> None:
         obj.result_display.append("Статус: Запрос отклонен. Требуется авторизация.")
         return
 
-    # 2. Достаем полный URL эндпоинта из правильного виджета
+    # Достаем полный URL эндпоинта из правильного виджета
     full_url = obj.api_request_url_input.text().strip()
 
     if not full_url:
@@ -86,17 +81,11 @@ def request_on_click(obj) -> None:
         obj.result_display.append("Статус: Запрос отклонен. Требуется эндпоинт.")
         return
 
-    # 3. Передаем JWT-токен с правильным префиксом Bearer
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    # Передаем JWT-токен с правильным префиксом Bearer
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # Передаем параметры фильтрации/поиска (Query Parameters)
-    params = {
-        "page": 1,
-        "status": "active"
-    }
+    params = {"page": 1, "status": "active"}
 
     logger.info(f"Отправка GET-запроса на {full_url}...")
     obj.result_display.append(f"Запрос: GET {full_url}\nПараметры: {params}")
@@ -107,7 +96,7 @@ def request_on_click(obj) -> None:
         with httpx.Client(trust_env=False) as client:
             response = client.get(full_url, headers=headers, params=params, timeout=10.0)
 
-        # 4. Проверяем HTTP статус-код (200 OK)
+        # Проверяем HTTP статус-код (200 OK)
         if response.status_code == 200:
             tasks_data = response.json()  # Безопасно парсим полученный JSON от Django
             logger.info("Данные успешно получены через HTTPX!")
@@ -123,10 +112,5 @@ def request_on_click(obj) -> None:
 
     # Перехватываем исключения исключительно из библиотеки httpx
     except httpx.HTTPError as e:
-        logger.error(f"Ошибка сети httpx при отправке запроса: {e}")
+        logger.exception("Ошибка сети httpx при отправке запроса: %s", e)
         obj.result_display.append(f"Критическая ошибка сети: {e}")
-
-
-def scanning_on_click(obj) -> None:
-    """Запуск универсального асинхронного экспресс-сканирования."""
-    run_security_api_scan(obj)
